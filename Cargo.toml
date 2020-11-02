@@ -1,0 +1,15 @@
+[package]
+name = "portsentinel"
+version = "0.1.0"
+authors = ["Dallen Bishop <dallen.bishop@uvu.edu"]
+license = "MIT"
+
+[dependencies]
+yaml-rust = "0.4"
+regex = "1"
+chrono = "0.4"
+nfqueue = "0.9"
+libc = "0.2"
+pnet = "0.26"
+uuid = { version = "0.8.1", features = ["v4"] }
+hex = "0.4.2"

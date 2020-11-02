@@ -1,0 +1,25 @@
+general:
+  bind_ip: 0.0.0.0
+  icmp_listener: true
+  file_logging: true
+  teams_notify: false
+  nfqueue: 0
+  captured_text_newline_seperator: "."
+screen:
+  print_ascii: false
+  print_binary: false
+  print_disconnect: false
+file_logging:
+  log_ascii: true
+  log_binary: false
+  log_disconnect: false
+teams:
+  channel_url:
+  log_ascii: false
+  log_binary: false
+  log_disconnect: false
+ports:
+ - tcp: 2222
+   banner: "SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3\r\n"
+ - tcp: 8080
+ - udp: 5400
