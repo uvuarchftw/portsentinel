@@ -11,7 +11,6 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use uuid::Uuid;
 
-use formatting::to_dotline;
 use hex;
 use State;
 use BINARY_MATCHES;
@@ -351,7 +350,7 @@ fn detect_msg(
     println!("{:>5} ! Read {} bytes from stream", local.port(), len);
 }
 
-fn parse_text(packet_data_buffer: &[u8], app: Arc<RwLock<AppConfig>>) -> String {
+pub(crate) fn parse_text(packet_data_buffer: &[u8], app: Arc<RwLock<AppConfig>>) -> String {
     let mut printable_text: Vec<u8> = Vec::new();
     for i in 0..packet_data_buffer.len() {
         // ASCII data, only allow newline or carriage return or US keyboard keys

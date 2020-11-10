@@ -26,10 +26,8 @@ use yaml_rust::{Yaml, YamlLoader};
 // use mhteams::{Message, Section, Image};
 // use reqwest::blocking::Client;
 
-use formatting::to_dotline;
-use listeners::{lurk_tcp, lurk_udp, nfq_callback};
+use listeners::{lurk_tcp, lurk_udp, nfq_callback,parse_text};
 
-pub mod formatting;
 pub mod listeners;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -169,7 +167,6 @@ pub struct Port {
     number: u16,
     count: u64,
 }
-
 impl PartialEq for Port {
     fn eq(&self, other: &Port) -> bool {
         self.number == other.number
@@ -344,7 +341,7 @@ fn main() {
             let mut banner = Arc::new(String::new());
             if let Some(x) = port["banner"].as_str() {
                 Arc::get_mut(&mut banner).unwrap().push_str(x);
-                println!("  with banner: {}", to_dotline(x.as_bytes()));
+                println!("  with banner: {}", parse_text(x.as_bytes(),app.clone()));
             }
 
             match TcpListener::bind((bind_ip.as_str(), portno as u16)) {
@@ -361,7 +358,7 @@ fn main() {
             let mut banner = Arc::new(String::new());
             if let Some(x) = port["banner"].as_str() {
                 Arc::get_mut(&mut banner).unwrap().push_str(x);
-                println!("  with banner: {}", to_dotline(x.as_bytes()));
+                println!("  with banner: {}", parse_text(x.as_bytes(),app.clone()));
             }
 
             match UdpSocket::bind((bind_ip.as_str(), portno as u16)) {
