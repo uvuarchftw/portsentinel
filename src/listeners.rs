@@ -79,9 +79,11 @@ pub fn lurk_tcp(
                 let start = Instant::now();
                 if banner.len() > 0 {
                     match stream.write((*banner).as_bytes()) {
-                        Ok(_) => {
-                            println!("{:>5} > {}", local.port(), parse_text(banner.as_bytes()))
-                        }
+                        Ok(_) => println!(
+                            "{:>5} > {}",
+                            local.port(),
+                            parse_text(banner.as_bytes(), app.clone())
+                        ),
                         Err(e) => {
                             if e.kind() == io::ErrorKind::WouldBlock {
                                 println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer);
@@ -106,13 +108,17 @@ pub fn lurk_tcp(
                                 let duration = start.elapsed().as_secs() as f32
                                     + start.elapsed().subsec_millis() as f32 / 1000.0;
                                 // use Duration::as_float_secs() here as soon as it stabilizes
-                                println!(
-                                    "{:>5} - TCP FIN from {} after {:.1}s",
-                                    local.port(),
-                                    peer,
-                                    duration
-                                );
-                                if app.read().unwrap().log_disconnect
+                                if app.read().unwrap().screen_config.print_disconnect {
+                                    println!(
+                                        "{:>5} - TCP FIN from {} after {:.1}s",
+                                        local.port(),
+                                        peer,
+                                        duration
+                                    );
+                                }
+
+                                if (app.read().unwrap().file_logging_config.log_disconnect
+                                    || app.read().unwrap().teams_logging_config.log_disconnect)
                                     && logchan
                                         .send(LogEntry::LogEntryFinish {
                                             uuid: con_uuid,
@@ -287,17 +293,13 @@ fn detect_msg(
     for line in data.lines() {
         ascii_text += &*line.replace("\r", "");
     }
-    if app.read().unwrap().print_ascii {
+    if app.read().unwrap().screen_config.print_ascii {
         println!("{:>5} | {}", local.port(), ascii_text);
     }
-    println!(
-        "{:>5} ! Read {} bytes of printable ASCII",
-        local.port(),
-        len
-    );
 
-    if app.read().unwrap().log_ascii {
-        if logchan
+    if (app.read().unwrap().file_logging_config.log_ascii
+        || app.read().unwrap().teams_logging_config.log_ascii)
+        && logchan
             .send(LogEntry::LogEntryMsg {
                 uuid: con_uuid,
                 msg: ascii_text.parse().unwrap(),
@@ -305,24 +307,24 @@ fn detect_msg(
                 msglen: len,
             })
             .is_err()
-        {
-            println!("Failed to write LogEntry to logging thread");
-        }
+    {
+        println!("Failed to write LogEntry to logging thread");
     }
     let packet_data_vector = packet_data_buffer[0..len].to_vec();
-    if app.read().unwrap().print_binary {
+    if app.read().unwrap().screen_config.print_hex {
         let hex = hex::encode(packet_data_vector.clone());
         for line in hex.lines() {
             println!("{:>5} . {}", local.port(), line);
         }
     }
-    if app.read().unwrap().log_binary {
-        let data = hex::encode(packet_data_vector.clone());
-        let mut hex_text: String = "".to_string();
-        for line in data.lines() {
-            hex_text += line;
-        }
-        if logchan
+    let data = hex::encode(packet_data_vector.clone());
+    let mut hex_text: String = "".to_string();
+    for line in data.lines() {
+        hex_text += line;
+    }
+    if (app.read().unwrap().file_logging_config.log_hex
+        || app.read().unwrap().teams_logging_config.log_hex)
+        && logchan
             .send(LogEntry::LogEntryMsg {
                 uuid: con_uuid,
                 msg: hex_text,
@@ -330,9 +332,8 @@ fn detect_msg(
                 msglen: len,
             })
             .is_err()
-        {
-            println!("Failed to write LogEntry to logging thread");
-        }
+    {
+        println!("Failed to write LogEntry to logging thread");
     }
     for id in app
         .read()
@@ -347,29 +348,30 @@ fn detect_msg(
             BINARY_MATCHES[id].0
         );
     }
+    println!("{:>5} ! Read {} bytes from stream", local.port(), len);
 }
 
-// fn parse_text(packet_data_buffer: [u8; 2048], len ) -> String {
-//     let mut printable_text: Vec<u8> = Vec::new();
-//     for i in 0..len {
-//         // ASCII data, only allow newline or carriage return or US keyboard keys
-//         if packet_data_buffer[i] > 31 && packet_data_buffer[i] < 127 {
-//             printable_text.push(packet_data_buffer[i]);
-//         } else if packet_data_buffer[i] == 10 || packet_data_buffer[i] == 13 {
-//             for letter in app
-//                 .read()
-//                 .unwrap()
-//                 .captured_text_newline_seperator
-//                 .as_bytes()
-//             {
-//                 printable_text.push(*letter);
-//             }
-//         }
-//     }
-//     let mut ascii_text: String = "".to_string();
-//     let data = String::from_utf8_lossy(printable_text.as_slice());
-//     for line in data.lines() {
-//         ascii_text += &*line.replace("\r", "");
-//     }
-//     return ascii_text;
-// }
+fn parse_text(packet_data_buffer: &[u8], app: Arc<RwLock<AppConfig>>) -> String {
+    let mut printable_text: Vec<u8> = Vec::new();
+    for i in 0..packet_data_buffer.len() {
+        // ASCII data, only allow newline or carriage return or US keyboard keys
+        if packet_data_buffer[i] > 31 && packet_data_buffer[i] < 127 {
+            printable_text.push(packet_data_buffer[i]);
+        } else if packet_data_buffer[i] == 10 || packet_data_buffer[i] == 13 {
+            for letter in app
+                .read()
+                .unwrap()
+                .captured_text_newline_seperator
+                .as_bytes()
+            {
+                printable_text.push(*letter);
+            }
+        }
+    }
+    let mut ascii_text: String = "".to_string();
+    let data = String::from_utf8_lossy(printable_text.as_slice());
+    for line in data.lines() {
+        ascii_text += &*line.replace("\r", "");
+    }
+    return ascii_text;
+}

@@ -1,8 +1,7 @@
 general:
   bind_ip: 0.0.0.0
-  icmp_listener: true
   file_logging: true
-  teams_notify: false
+  teams_logging: false
   nfqueue: 0
   captured_text_newline_seperator: "."
 screen:

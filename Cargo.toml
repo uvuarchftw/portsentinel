@@ -1,7 +1,7 @@
 [package]
 name = "portsentinel"
 version = "0.1.0"
-authors = ["Dallen Bishop <dallen.bishop@uvu.edu"]
+authors = ["Dallen Bishop <dallen.bishop@uvu.edu>"]
 license = "MIT"
 
 [dependencies]

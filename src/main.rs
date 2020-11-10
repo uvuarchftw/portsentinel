@@ -1,11 +1,11 @@
 extern crate chrono;
+extern crate hex;
 extern crate libc;
 extern crate nfqueue;
 extern crate pnet;
 extern crate regex;
 extern crate uuid;
 extern crate yaml_rust;
-extern crate hex;
 // extern crate mhteams;
 // extern crate reqwest;
 
@@ -75,16 +75,39 @@ const BINARY_MATCHES: [(&str, &str); 34] = [
 ];
 
 #[derive(Clone)]
-pub struct AppConfig {
+pub struct ScreenConfig {
     print_ascii: bool,
-    print_binary: bool,
-    captured_text_newline_seperator: String,
-    file_logging: bool,
+    print_hex: bool,
+    print_disconnect: bool,
+}
+
+#[derive(Clone)]
+pub struct FileLoggingConfig {
     log_ascii: bool,
-    log_binary: bool,
+    log_hex: bool,
     log_disconnect: bool,
-    nfqueue: Option<u16>,
+}
+
+#[derive(Clone)]
+pub struct TeamsLoggingConfig {
+    channel_url: String,
+    log_ascii: bool,
+    log_hex: bool,
+    log_disconnect: bool,
+}
+
+#[derive(Clone)]
+pub struct AppConfig {
     bind_ip: String,
+    file_logging: bool,
+    teams_logging: bool,
+    captured_text_newline_seperator: String,
+    nfqueue: Option<u16>,
+
+    screen_config: ScreenConfig,
+    file_logging_config: FileLoggingConfig,
+    teams_logging_config: TeamsLoggingConfig,
+
     io_timeout: Duration,
     regexset: RegexSet,
 }
@@ -184,21 +207,33 @@ fn main() {
     let docs = YamlLoader::load_from_str(&config_str).unwrap();
     let config = &docs[0];
 
-    let app = AppConfig {
-        print_ascii: false,
-        print_binary: false,
-        captured_text_newline_seperator: ".".to_string(),
-        file_logging: false,
-        log_ascii: false,
-        log_binary: false,
-        log_disconnect: false,
-        nfqueue: None,
+    let default_app = AppConfig {
         bind_ip: String::new(),
+        file_logging: false,
+        teams_logging: false,
+        captured_text_newline_seperator: ".".to_string(),
+        nfqueue: None,
+        screen_config: ScreenConfig {
+            print_ascii: false,
+            print_hex: false,
+            print_disconnect: false,
+        },
+        file_logging_config: FileLoggingConfig {
+            log_ascii: false,
+            log_hex: false,
+            log_disconnect: false,
+        },
+        teams_logging_config: TeamsLoggingConfig {
+            channel_url: "".to_string(),
+            log_ascii: false,
+            log_hex: false,
+            log_disconnect: false,
+        },
         io_timeout: Duration::new(300, 0),
         regexset: RegexSet::new(&[] as &[&str]).unwrap(),
     };
 
-    let configured_app = Arc::new(RwLock::new(parse_config(app, &config.clone())));
+    let configured_app = Arc::new(RwLock::new(parse_config(default_app, &config)));
 
     let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
     for &(_, pattern) in BINARY_MATCHES.iter() {
@@ -212,16 +247,18 @@ fn main() {
 
     println!("\nStarting listeners on the following ports:");
 
+    let app = configured_app.clone();
     let (log_tx, log_rx) = channel();
-    let file_logging = configured_app.read().unwrap().file_logging;
     thread::spawn(move || {
         // Logging thread
         loop {
             let conn: LogEntry = log_rx.recv().unwrap();
             let log_msg;
-            if file_logging {
-                let current_time = Local::now();
-                let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+
+            let current_time = Local::now();
+            let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+
+            if app.read().unwrap().file_logging {
                 let mut file = OpenOptions::new()
                     .append(true)
                     .create(true)
@@ -269,30 +306,30 @@ fn main() {
                     }
                 }
             }
-            else if teams {
-                // let msg = Message::new()
-                //     .title("My title")
-                //     .text("TL;DR: it's awesome 👍")
-                //     .sections(vec![
-                //         Section::new()
-                //             .title("The **Section**")
-                //             .activity_title("_Check this out_")
-                //             .activity_subtitle("It's awesome")
-                //             .activity_text("Lorum ipsum!"),
-                //         Section::new()
-                //             .title("Layin down some facts ✅")
-                //             .facts(vec![
-                //                 Fact::new("Name", "John Smith"),
-                //                 Fact::new("Language", "Rust. What else?"),
-                //             ]),
-                //     ]);
-
-                // let client = Client::new();
-                // let resp = client
-                //     .post('')
-                //     .json(&msg)
-                //     .send()?;
-            }
+            // else if app.read().unwrap().teams_logging {
+            //     let msg = Message::new()
+            //         .title("My title")
+            //         .text("TL;DR: it's awesome 👍")
+            //         .sections(vec![
+            //             Section::new()
+            //                 .title("The **Section**")
+            //                 .activity_title("_Check this out_")
+            //                 .activity_subtitle("It's awesome")
+            //                 .activity_text("Lorum ipsum!"),
+            //             Section::new()
+            //                 .title("Layin down some facts ✅")
+            //                 .facts(vec![
+            //                     Fact::new("Name", "John Smith"),
+            //                     Fact::new("Language", "Rust. What else?"),
+            //                 ]),
+            //         ]);
+            //
+            //     let client = Client::new();
+            //     let resp = client
+            //         .post('')
+            //         .json(&msg)
+            //         .send()?;
+            // }
         }
     });
 
@@ -350,108 +387,199 @@ fn parse_config(mut app: AppConfig, config: &Yaml) -> AppConfig {
     if config["general"].is_badvalue() {
         println!("No 'general' section found in configuration file");
         exit(-1);
+    } else {
+        if !config["general"]["bind_ip"].is_badvalue() {
+            app.bind_ip = config["general"]["bind_ip"]
+                .as_str()
+                .expect("Invalid ['bind_ip'] value")
+                .to_string();
+            println!("Binding to external IP {}", app.bind_ip);
+        } else {
+            println!("No 'bind_ip' section found in configuration file");
+            app.bind_ip = String::from("0.0.0.0");
+            println!("Binding to default external IP {}", app.bind_ip);
+        }
+
+        if !config["general"]["file_logging"].is_badvalue() {
+            if config["general"]["file_logging"].as_bool().unwrap() {
+                app.file_logging = true;
+                println!("File Logging enabled");
+            } else {
+                println!("File Logging disabled");
+            }
+        } else {
+            println!("Invalid ['file_logging'] value");
+            exit(-2);
+        }
+
+        if !config["general"]["teams_logging"].is_badvalue() {
+            if config["general"]["teams_logging"].as_bool().unwrap() {
+                app.teams_logging = true;
+                println!("Teams Logging enabled");
+            } else {
+                println!("Teams Logging disabled");
+            }
+        } else {
+            println!("Invalid ['teams_logging'] value");
+            exit(-2);
+        }
+
+        if !config["general"]["captured_text_newline_seperator"].is_badvalue() {
+            app.captured_text_newline_seperator = config["general"]
+                ["captured_text_newline_seperator"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+        } else {
+            app.captured_text_newline_seperator = ".".to_string();
+        }
+
+        if !config["general"]["nfqueue"].is_badvalue() {
+            match config["general"]["nfqueue"].as_i64() {
+                Some(queue) => {
+                    app.nfqueue = Some(queue as u16);
+                    println!(
+                        "Receiving SYN packets from nfqueue {}",
+                        app.nfqueue.unwrap()
+                    );
+                    println!("Example iptables rule to make this work:");
+                    println!(
+                        "\n  iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass",
+                        app.nfqueue.unwrap()
+                    );
+                }
+                None => println!("Invalid ['nfqueue'] value"),
+            };
+        } else {
+            println!("Unable to find ['general']['nfqueue'] section. Continuing...")
+        }
     }
+    if config["screen"].is_badvalue() {
+        println!("No 'screen' section found in configuration file");
+        exit(-1);
+    } else {
+        if !config["screen"]["print_ascii"].is_badvalue() {
+            if config["screen"]["print_ascii"].as_bool().unwrap() {
+                app.screen_config.print_ascii = true;
+                println!("Printing ASCII");
+            }
+        } else {
+            println!("Invalid ['print_ascii'] value");
+            exit(-2);
+        }
+
+        if !config["screen"]["print_hex"].is_badvalue() {
+            if config["screen"]["print_hex"].as_bool().unwrap() {
+                app.screen_config.print_hex = true;
+                println!("Printing hexadecimal");
+            }
+        } else {
+            println!("Invalid ['print_hex'] value");
+            exit(-2);
+        }
+
+        if !config["screen"]["print_disconnect"].is_badvalue() {
+            if config["screen"]["print_disconnect"].as_bool().unwrap() {
+                app.screen_config.print_disconnect = true;
+                println!("Printing connection times");
+            }
+        } else {
+            println!("Invalid ['print_disconnect'] value");
+            exit(-2);
+        }
+    }
+
+    if config["file_logging"].is_badvalue() {
+        println!("No 'file_logging' section found in configuration file");
+        exit(-1);
+    } else if config["general"]["file_logging"].as_bool().unwrap() {
+        if !config["file_logging"]["log_ascii"].is_badvalue() {
+            if config["file_logging"]["log_ascii"].as_bool().unwrap() {
+                app.file_logging_config.log_ascii = true;
+                println!("Logging ASCII to file");
+            }
+        } else {
+            println!("Invalid ['log_ascii'] value");
+            exit(-2);
+        }
+
+        if !config["file_logging"]["log_hex"].is_badvalue() {
+            if config["file_logging"]["log_hex"].as_bool().unwrap() {
+                app.file_logging_config.log_hex = true;
+                println!("Logging hexadecimal to file");
+            }
+        } else {
+            println!("Invalid ['log_hex'] value");
+            exit(-2);
+        }
+
+        if !config["file_logging"]["log_disconnect"].is_badvalue() {
+            if config["file_logging"]["log_disconnect"].as_bool().unwrap() {
+                app.file_logging_config.log_disconnect = true;
+                println!("Logging connection times to file");
+            }
+        } else {
+            println!("Invalid ['log_disconnect'] value");
+            exit(-2);
+        }
+    }
+
+    if config["teams"].is_badvalue() {
+        println!("No 'teams' section found in configuration file");
+        exit(-1);
+    } else if config["general"]["teams_logging"].as_bool().unwrap() {
+        if !config["teams"]["channel_url"].is_badvalue() {
+            if !config["teams"]["channel_url"].as_str().is_none() {
+                app.teams_logging_config.channel_url = config["teams"]["channel_url"]
+                    .as_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+            } else {
+                println!("Invalid ['channel_url'] value");
+                exit(-2);
+            }
+        } else {
+            println!("Invalid ['channel_url'] value");
+            exit(-2);
+        }
+
+        if !config["teams"]["log_ascii"].is_badvalue() {
+            if config["teams"]["log_ascii"].as_bool().unwrap() {
+                app.teams_logging_config.log_ascii = true;
+                println!("Logging ASCII to Teams");
+            }
+        } else {
+            println!("Invalid ['log_ascii'] value");
+            exit(-2);
+        }
+
+        if !config["teams"]["log_hex"].is_badvalue() {
+            if config["teams"]["log_hex"].as_bool().unwrap() {
+                app.teams_logging_config.log_hex = true;
+                println!("Logging hexadecimal to Teams");
+            }
+        } else {
+            println!("Invalid ['log_hex'] value");
+            exit(-2);
+        }
+
+        if !config["teams"]["log_disconnect"].is_badvalue() {
+            if config["teams"]["log_disconnect"].as_bool().unwrap() {
+                app.teams_logging_config.log_disconnect = true;
+                println!("Logging disconnect times to Teams");
+            }
+        } else {
+            println!("Invalid ['log_disconnect'] value");
+            exit(-2);
+        }
+    }
+
     if config["ports"].is_badvalue() {
         println!("No 'ports' section found in configuration file");
         exit(-1);
     }
 
-    if !config["general"]["bind_ip"].is_badvalue() {
-        app.bind_ip = config["general"]["bind_ip"]
-            .as_str()
-            .expect("Invalid ['bind_ip'] value")
-            .to_string();
-        println!("Binding to external IP {}", app.bind_ip);
-    } else {
-        println!("No 'bind_ip' section found in configuration file");
-        app.bind_ip = String::from("0.0.0.0");
-        println!("Binding to default external IP {}", app.bind_ip);
-    }
-
-    if !config["general"]["print_ascii"].is_badvalue() {
-        if config["general"]["print_ascii"].as_bool().unwrap() {
-            app.print_ascii = true;
-            println!("Printing ASCII");
-        }
-    } else {
-        println!("Invalid ['print_ascii'] value");
-        exit(-2);
-    }
-    if !config["general"]["print_binary"].is_badvalue() {
-        if config["general"]["print_binary"].as_bool().unwrap() {
-            app.print_binary = true;
-            println!("Printing binary in hexadecimal");
-        }
-    } else {
-        println!("Invalid ['print_binary'] value");
-        exit(-2);
-    }
-    if !config["general"]["captured_text_newline_seperator"].is_badvalue() {
-        app.captured_text_newline_seperator = config["general"]["captured_text_newline_seperator"].as_str().unwrap().parse().unwrap();
-    }
-    else {
-        app.captured_text_newline_seperator = ".".to_string();
-    }
-
-    if !config["general"]["file_logging"].is_badvalue() {
-        if config["general"]["file_logging"].as_bool().unwrap() {
-            app.file_logging = true;
-            println!("Logging to local text file");
-        }
-    } else {
-        println!("Invalid ['file_logging'] value");
-        exit(-2);
-    }
-
-    if !config["file_logging"]["log_ascii"].is_badvalue() {
-        if config["file_logging"]["log_ascii"].as_bool().unwrap() {
-            app.log_ascii = true;
-            println!("Logging any detected ASCII to local text file");
-        }
-    } else {
-        println!("Invalid ['file_logging']['log_ascii'] value");
-        exit(-2);
-    }
-
-    if !config["file_logging"]["log_binary"].is_badvalue() {
-        if config["file_logging"]["log_binary"].as_bool().unwrap() {
-            app.log_binary = true;
-            println!("Logging any binary (as hex) to local text file");
-        }
-    } else {
-        println!("Invalid ['file_logging']['log_binary'] value");
-        exit(-2);
-    }
-
-    if !config["file_logging"]["log_disconnect"].is_badvalue() {
-        if config["file_logging"]["log_disconnect"].as_bool().unwrap() {
-            app.log_disconnect = true;
-            println!("Logging TCP connection times to local text file");
-        }
-    } else {
-        println!("Invalid ['file_logging']['log_disconnect'] value");
-        exit(-2);
-    }
-
-    if !config["general"]["nfqueue"].is_badvalue() {
-        match config["general"]["nfqueue"].as_i64() {
-            Some(queue) => {
-                app.nfqueue = Some(queue as u16);
-                println!(
-                    "Receiving SYN packets from nfqueue {}",
-                    app.nfqueue.unwrap()
-                );
-                println!("Example iptables rule to make this work:");
-                println!(
-                    "\n  iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass",
-                    app.nfqueue.unwrap()
-                );
-            }
-            None => println!("Invalid ['nfqueue'] value"),
-        };
-    } else {
-        println!("Unable to find ['general']['nfqueue'] section. Continuing...")
-    }
-
-    return app; // send our config to the main function
+    return app;
 }
