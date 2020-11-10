@@ -6,8 +6,8 @@ extern crate pnet;
 extern crate regex;
 extern crate uuid;
 extern crate yaml_rust;
-// extern crate mhteams;
-// extern crate reqwest;
+extern crate mhteams;
+extern crate reqwest;
 
 use std::fmt;
 use std::fs::File;
@@ -23,8 +23,8 @@ use std::time::Duration;
 use chrono::Local;
 use regex::bytes::{RegexSet, RegexSetBuilder};
 use yaml_rust::{Yaml, YamlLoader};
-// use mhteams::{Message, Section, Image};
-// use reqwest::blocking::Client;
+use mhteams::{Message, Section, Image};
+use reqwest::blocking::Client;
 
 use listeners::{lurk_tcp, lurk_udp, nfq_callback,parse_text};
 
