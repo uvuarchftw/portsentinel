@@ -23,7 +23,7 @@ use std::time::Duration;
 use chrono::Local;
 use regex::bytes::{RegexSet, RegexSetBuilder};
 use yaml_rust::{Yaml, YamlLoader};
-use mhteams::{Message, Section, Image};
+use mhteams::{Message, Section, Image, Fact};
 use reqwest::blocking::Client;
 
 use listeners::{lurk_tcp, lurk_udp, nfq_callback,parse_text};
@@ -250,10 +250,7 @@ fn main() {
         // Logging thread
         loop {
             let conn: LogEntry = log_rx.recv().unwrap();
-            let log_msg;
-
-            let current_time = Local::now();
-            let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+            let msg = parse_msg(conn);
 
             if app.read().unwrap().file_logging {
                 let mut file = OpenOptions::new()
@@ -261,72 +258,18 @@ fn main() {
                     .create(true)
                     .open("portsentinel.log")
                     .expect("Failed to open local log file for writing");
-                match conn {
-                    LogEntry::LogEntryStart {
-                        uuid,
-                        transporttype,
-                        localip,
-                        localport,
-                        remoteip,
-                        remoteport,
-                    } => {
-                        log_msg = format!(
-                            "[{}]: Connection-ID: {} {} DEST_IP {}:{} SRC_IP {}:{} ",
-                            formatted_time,
-                            uuid,
-                            transporttype,
-                            localip,
-                            localport,
-                            remoteip,
-                            remoteport
-                        );
-                        writeln!(file, "{}", log_msg).unwrap();
-                    }
-                    LogEntry::LogEntryMsg {
-                        uuid,
-                        msg,
-                        msgtype,
-                        msglen,
-                    } => {
-                        log_msg = format!(
-                            "[{}]: Connection-ID: {} {} {} Bytes: {}",
-                            formatted_time, uuid, msgtype, msglen, msg
-                        );
-                        writeln!(file, "{}", log_msg).unwrap();
-                    }
-                    LogEntry::LogEntryFinish { uuid, duration } => {
-                        log_msg = format!(
-                            "[{}]: Connection-ID: {} Connection Duration: {} seconds",
-                            formatted_time, uuid, duration
-                        );
-                        writeln!(file, "{}", log_msg).unwrap();
-                    }
-                }
+                writeln!(file, "{}", msg).unwrap();
             }
-            // else if app.read().unwrap().teams_logging {
-            //     let msg = Message::new()
-            //         .title("My title")
-            //         .text("TL;DR: it's awesome 👍")
-            //         .sections(vec![
-            //             Section::new()
-            //                 .title("The **Section**")
-            //                 .activity_title("_Check this out_")
-            //                 .activity_subtitle("It's awesome")
-            //                 .activity_text("Lorum ipsum!"),
-            //             Section::new()
-            //                 .title("Layin down some facts ✅")
-            //                 .facts(vec![
-            //                     Fact::new("Name", "John Smith"),
-            //                     Fact::new("Language", "Rust. What else?"),
-            //                 ]),
-            //         ]);
-            //
-            //     let client = Client::new();
-            //     let resp = client
-            //         .post('')
-            //         .json(&msg)
-            //         .send()?;
-            // }
+            if app.read().unwrap().teams_logging {
+                let json_msg = Message::new()
+                    .text(msg);
+
+                let client = Client::new();
+                let resp = client
+                    .post(&app.read().unwrap().teams_logging_config.channel_url.clone())
+                    .json(&json_msg)
+                    .send().unwrap();
+            }
         }
     });
 
@@ -579,4 +522,47 @@ fn parse_config(mut app: AppConfig, config: &Yaml) -> AppConfig {
     }
 
     return app;
+}
+
+fn parse_msg(conn: LogEntry) -> String {
+    let current_time = Local::now();
+    let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+    match conn {
+        LogEntry::LogEntryStart {
+            uuid,
+            transporttype,
+            localip,
+            localport,
+            remoteip,
+            remoteport,
+        } => {
+            return format!(
+                "[{}]: Connection-ID: {} {} DEST_IP {}:{} SRC_IP {}:{} ",
+                formatted_time,
+                uuid,
+                transporttype,
+                localip,
+                localport,
+                remoteip,
+                remoteport
+            );
+        }
+        LogEntry::LogEntryMsg {
+            uuid,
+            msg,
+            msgtype,
+            msglen,
+        } => {
+            return format!(
+                "[{}]: Connection-ID: {} {} {} Bytes: {}",
+                formatted_time, uuid, msgtype, msglen, msg
+            );
+        }
+        LogEntry::LogEntryFinish { uuid, duration } => {
+            return format!(
+                "[{}]: Connection-ID: {} Connection Duration: {} seconds",
+                formatted_time, uuid, duration
+            );
+        }
+    }
 }
