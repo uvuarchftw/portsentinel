@@ -2,20 +2,20 @@ general:
   bind_ip: 0.0.0.0
   file_logging: true
   teams_logging: false
-  nfqueue: 0
+  #nfqueue: 0
   captured_text_newline_seperator: "."
 screen:
   print_ascii: false
-  print_binary: false
+  print_hex: false
   print_disconnect: false
 file_logging:
   log_ascii: true
-  log_binary: false
+  log_hex: false
   log_disconnect: false
 teams:
   channel_url:
   log_ascii: false
-  log_binary: false
+  log_hex: false
   log_disconnect: false
 ports:
  - tcp: 2222
