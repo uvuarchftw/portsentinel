@@ -12,16 +12,12 @@ use pnet::packet::Packet;
 use uuid::Uuid;
 
 use hex;
+use types::*;
 use State;
 use BINARY_MATCHES;
-use {AppConfig, LogEntry, LogMsgType, LogTransportType};
+use SETTINGS;
 
-pub fn lurk_tcp(
-    app: Arc<RwLock<AppConfig>>,
-    socket: TcpListener,
-    logchan: Sender<LogEntry>,
-    banner: Arc<String>,
-) {
+pub fn lurk_tcp(socket: TcpListener, logchan: Sender<LogEntry>, banner: Arc<String>) {
     thread::spawn(move || {
         for res in socket.incoming() {
             let mut stream = match res {
@@ -36,10 +32,10 @@ pub fn lurk_tcp(
                 }
             };
             stream
-                .set_read_timeout(Some(app.read().unwrap().io_timeout))
+                .set_read_timeout(Some(SETTINGS.read().unwrap().io_timeout))
                 .expect("Failed to set read timeout on TcpStream");
             stream
-                .set_write_timeout(Some(app.read().unwrap().io_timeout))
+                .set_write_timeout(Some(SETTINGS.read().unwrap().io_timeout))
                 .expect("Failed to set write timeout on TcpStream");
             let local = stream.local_addr().unwrap();
             let peer = match stream.peer_addr() {
@@ -59,7 +55,7 @@ pub fn lurk_tcp(
             if logchan
                 .send(LogEntry::LogEntryStart {
                     uuid: con_uuid,
-                    transporttype: LogTransportType::Tcp,
+                    transporttype: TransportType::Tcp,
                     remoteip: peer.ip().to_string(),
                     remoteport: peer.port(),
                     localip: local.ip().to_string(),
@@ -70,7 +66,6 @@ pub fn lurk_tcp(
                 println!("Failed to write LogEntry to logging thread");
             }
 
-            let app = app.clone();
             let banner = banner.clone();
             let logchan = logchan.clone();
             thread::spawn(move || {
@@ -78,11 +73,9 @@ pub fn lurk_tcp(
                 let start = Instant::now();
                 if banner.len() > 0 {
                     match stream.write((*banner).as_bytes()) {
-                        Ok(_) => println!(
-                            "{:>5} > {}",
-                            local.port(),
-                            parse_text(banner.as_bytes(), app.clone())
-                        ),
+                        Ok(_) => {
+                            println!("{:>5} > {}", local.port(), parse_text(banner.as_bytes()))
+                        }
                         Err(e) => {
                             if e.kind() == io::ErrorKind::WouldBlock {
                                 println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer);
@@ -107,7 +100,7 @@ pub fn lurk_tcp(
                                 let duration = start.elapsed().as_secs() as f32
                                     + start.elapsed().subsec_millis() as f32 / 1000.0;
                                 // use Duration::as_float_secs() here as soon as it stabilizes
-                                if app.read().unwrap().screen_config.print_disconnect {
+                                if SETTINGS.read().unwrap().screen_config.print_disconnect {
                                     println!(
                                         "{:>5} - TCP FIN from {} after {:.1}s",
                                         local.port(),
@@ -116,8 +109,8 @@ pub fn lurk_tcp(
                                     );
                                 }
 
-                                if (app.read().unwrap().file_logging_config.log_disconnect
-                                    || app.read().unwrap().teams_logging_config.log_disconnect)
+                                if (SETTINGS.read().unwrap().file_logging_config.log_disconnect
+                                    || SETTINGS.read().unwrap().teams_logging_config.log_disconnect)
                                     && logchan
                                         .send(LogEntry::LogEntryFinish {
                                             uuid: con_uuid,
@@ -129,14 +122,7 @@ pub fn lurk_tcp(
                                 }
                                 break;
                             }
-                            detect_msg(
-                                tcp_stream_length,
-                                buf,
-                                app.clone(),
-                                local,
-                                logchan.clone(),
-                                con_uuid,
-                            );
+                            detect_msg(tcp_stream_length, buf, local, logchan.clone(), con_uuid);
                         }
                         Err(e) => {
                             if e.kind() == io::ErrorKind::WouldBlock {
@@ -165,7 +151,7 @@ pub fn lurk_tcp(
                             }
                         }
                         Err(_) => {
-                            println!("This shouldn't happen...");
+                            println!("This shouldn't hSETTINGSen...");
                             break;
                         }
                     }
@@ -176,7 +162,6 @@ pub fn lurk_tcp(
 }
 
 pub fn lurk_udp(
-    app: Arc<RwLock<AppConfig>>,
     socket: UdpSocket,
     local_bind: (String, u16),
     logchan: Sender<LogEntry>,
@@ -197,7 +182,7 @@ pub fn lurk_udp(
             if logchan
                 .send(LogEntry::LogEntryStart {
                     uuid: con_uuid,
-                    transporttype: LogTransportType::Udp,
+                    transporttype: TransportType::Udp,
                     remoteip: src_addr.ip().to_string(),
                     remoteport: src_addr.port(),
                     localip: local_bind.0.clone(),
@@ -211,7 +196,6 @@ pub fn lurk_udp(
             detect_msg(
                 number_of_bytes,
                 buf,
-                app.clone(),
                 socket.local_addr().unwrap(),
                 logchan.clone(),
                 con_uuid,
@@ -246,7 +230,7 @@ pub fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
                     let con_uuid = Uuid::new_v4().to_hyphenated();
                     let _ = state.logchan.send(LogEntry::LogEntryStart {
                         uuid: con_uuid,
-                        transporttype: LogTransportType::Tcp,
+                        transporttype: TransportType::Tcp,
                         remoteip: remoteip.to_string(),
                         remoteport: p.get_source(),
                         localip: "".to_string(),
@@ -266,7 +250,6 @@ pub fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
 fn detect_msg(
     len: usize,
     packet_data_buffer: [u8; 2048],
-    app: std::sync::Arc<std::sync::RwLock<AppConfig>>,
     local: SocketAddr,
     logchan: Sender<LogEntry>,
     con_uuid: uuid::adapter::Hyphenated,
@@ -277,7 +260,7 @@ fn detect_msg(
         if packet_data_buffer[i] > 31 && packet_data_buffer[i] < 127 {
             printable_text.push(packet_data_buffer[i]);
         } else if packet_data_buffer[i] == 10 || packet_data_buffer[i] == 13 {
-            for letter in app
+            for letter in SETTINGS
                 .read()
                 .unwrap()
                 .captured_text_newline_seperator
@@ -292,12 +275,12 @@ fn detect_msg(
     for line in data.lines() {
         ascii_text += &*line.replace("\r", "");
     }
-    if app.read().unwrap().screen_config.print_ascii {
+    if SETTINGS.read().unwrap().screen_config.print_ascii {
         println!("{:>5} | {}", local.port(), ascii_text);
     }
 
-    if (app.read().unwrap().file_logging_config.log_ascii
-        || app.read().unwrap().teams_logging_config.log_ascii)
+    if (SETTINGS.read().unwrap().file_logging_config.log_ascii
+        || SETTINGS.read().unwrap().teams_logging_config.log_ascii)
         && logchan
             .send(LogEntry::LogEntryMsg {
                 uuid: con_uuid,
@@ -310,7 +293,7 @@ fn detect_msg(
         println!("Failed to write LogEntry to logging thread");
     }
     let packet_data_vector = packet_data_buffer[0..len].to_vec();
-    if app.read().unwrap().screen_config.print_hex {
+    if SETTINGS.read().unwrap().screen_config.print_hex {
         let hex = hex::encode(packet_data_vector.clone());
         for line in hex.lines() {
             println!("{:>5} . {}", local.port(), line);
@@ -321,8 +304,8 @@ fn detect_msg(
     for line in data.lines() {
         hex_text += line;
     }
-    if (app.read().unwrap().file_logging_config.log_hex
-        || app.read().unwrap().teams_logging_config.log_hex)
+    if (SETTINGS.read().unwrap().file_logging_config.log_hex
+        || SETTINGS.read().unwrap().teams_logging_config.log_hex)
         && logchan
             .send(LogEntry::LogEntryMsg {
                 uuid: con_uuid,
@@ -334,30 +317,31 @@ fn detect_msg(
     {
         println!("Failed to write LogEntry to logging thread");
     }
-    for id in app
-        .read()
-        .unwrap()
-        .regexset
-        .matches(&packet_data_buffer[..len])
-        .into_iter()
-    {
-        println!(
-            "{:>5} ^ Matches pattern {}",
-            local.port(),
-            BINARY_MATCHES[id].0
-        );
-    }
+    // for id in SETTINGS
+    //     .read()
+    //     .unwrap()
+    //     .regexset
+    //     .matches(&packet_data_buffer[..len])
+    //     .into_iter()
+    // {
+    //     println!(
+    //         "{:>5} ^ Matches pattern {}",
+    //         local.port(),
+    //         BINARY_MATCHES[id].0
+    //     );
+    // }
     println!("{:>5} ! Read {} bytes from stream", local.port(), len);
 }
 
-pub(crate) fn parse_text(packet_data_buffer: &[u8], app: Arc<RwLock<AppConfig>>) -> String {
+pub(crate) fn parse_text(packet_data_buffer: &[u8]) -> String {
     let mut printable_text: Vec<u8> = Vec::new();
+    print!("{}", "test");
     for i in 0..packet_data_buffer.len() {
         // ASCII data, only allow newline or carriage return or US keyboard keys
         if packet_data_buffer[i] > 31 && packet_data_buffer[i] < 127 {
             printable_text.push(packet_data_buffer[i]);
         } else if packet_data_buffer[i] == 10 || packet_data_buffer[i] == 13 {
-            for letter in app
+            for letter in SETTINGS
                 .read()
                 .unwrap()
                 .captured_text_newline_seperator
