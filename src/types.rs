@@ -1,4 +1,3 @@
-use regex::RegexSet;
 use std::fmt;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -31,14 +30,12 @@ pub struct AppConfig {
     pub(crate) file_logging: bool,
     pub(crate) teams_logging: bool,
     pub(crate) captured_text_newline_seperator: String,
-    pub(crate) nfqueue: Option<u16>,
 
     pub(crate) screen_config: ScreenConfig,
     pub(crate) file_logging_config: FileLoggingConfig,
     pub(crate) teams_logging_config: TeamsLoggingConfig,
 
     pub(crate) io_timeout: Duration,
-    pub(crate) regexset: RegexSet,
     pub(crate) ports: Vec<Port>,
 }
 
@@ -96,10 +93,12 @@ pub enum LogEntry {
 
 #[derive(Clone)]
 pub struct Port {
-    pub(crate) port_num: Option<i64>,
+    pub(crate) port_num: Option<u16>,
     pub(crate) port_type: TransportType,
     pub(crate) banner: Option<String>,
-    pub(crate) nfqueue: Option<i64>,
+    pub(crate) nfqueue: Option<u16>,
+    pub(crate) bind_ip: String,
+    pub(crate) io_timeout: Duration,
 }
 
 pub struct State {

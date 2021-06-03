@@ -1,32 +1,16 @@
-use listeners::parse_text;
-use regex::RegexSet;
 use std::fs::File;
 use std::io::Read;
 use std::process::exit;
 use std::time::Duration;
 use types::*;
-use yaml_rust::{Yaml, YamlLoader};
+use yaml_rust::YamlLoader;
 
-pub(crate) fn parse_config() -> AppConfig {
-    let mut config_str = String::new();
-    let mut file = match File::open("config.yaml") {
-        Ok(file) => file,
-        Err(e) => {
-            println!("Unable to open configuration file: {}", e.to_string());
-            exit(-1);
-        }
-    };
-
-    file.read_to_string(&mut config_str).unwrap();
-    let docs = YamlLoader::load_from_str(&config_str).unwrap();
-    let config = &docs[0];
-
-    let mut app = AppConfig {
+pub(crate) fn load_defaults() -> AppConfig {
+    let app = AppConfig {
         bind_ip: String::new(),
         file_logging: false,
         teams_logging: false,
         captured_text_newline_seperator: ".".to_string(),
-        nfqueue: None,
         screen_config: ScreenConfig {
             print_ascii: false,
             print_hex: false,
@@ -44,9 +28,25 @@ pub(crate) fn parse_config() -> AppConfig {
             log_disconnect: false,
         },
         io_timeout: Duration::new(300, 0),
-        regexset: RegexSet::new(&[] as &[&str]).unwrap(),
         ports: vec![],
     };
+
+    return app;
+}
+
+pub(crate) fn parse_config(mut app: AppConfig) -> AppConfig {
+    let mut config_str = String::new();
+    let mut file = match File::open("config.yaml") {
+        Ok(file) => file,
+        Err(e) => {
+            println!("Unable to open configuration file: {}", e.to_string());
+            exit(-1);
+        }
+    };
+
+    file.read_to_string(&mut config_str).unwrap();
+    let docs = YamlLoader::load_from_str(&config_str).unwrap();
+    let config = &docs[0];
 
     if config["general"].is_badvalue() {
         println!("No 'general' section found in configuration file");
@@ -57,7 +57,7 @@ pub(crate) fn parse_config() -> AppConfig {
                 .as_str()
                 .expect("Invalid ['bind_ip'] value")
                 .to_string();
-            println!("Binding to external IP {}", app.bind_ip);
+            println!("Binding to IP {}", app.bind_ip);
         } else {
             println!("No 'bind_ip' section found in configuration file");
             app.bind_ip = String::from("0.0.0.0");
@@ -98,26 +98,6 @@ pub(crate) fn parse_config() -> AppConfig {
         } else {
             app.captured_text_newline_seperator = ".".to_string();
         }
-
-        // if !config["general"]["nfqueue"].is_badvalue() {
-        //     match config["general"]["nfqueue"].as_i64() {
-        //         Some(queue) => {
-        //             app.nfqueue = Some(queue as u16);
-        //             println!(
-        //                 "Receiving SYN packets from nfqueue {}",
-        //                 app.nfqueue.unwrap()
-        //             );
-        //             println!("Example iptables rule to make this work:");
-        //             println!(
-        //                 "\n  iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass",
-        //                 app.nfqueue.unwrap()
-        //             );
-        //         }
-        //         None => println!("Invalid ['nfqueue'] value"),
-        //     };
-        // } else {
-        //     println!("Unable to find ['general']['nfqueue'] section. Continuing...")
-        // }
     }
     if config["screen"].is_badvalue() {
         println!("No 'screen' section found in configuration file");
@@ -242,10 +222,12 @@ pub(crate) fn parse_config() -> AppConfig {
 
     println!("\nStarting listeners on the following ports:");
     for port in config["ports"].as_vec().unwrap() {
-        let mut port_num = None;
+        let mut port_num: Option<u16> = None;
         let mut port_type: TransportType = TransportType::Tcp;
         let mut banner: Option<String> = None;
-        let mut nfqueue = None;
+        let mut nfqueue:Option<u16> = None;
+        let bind_ip = app.bind_ip.clone();
+        let io_timeout = app.io_timeout;
 
         if !port["tcp"].is_badvalue() {
             port_type = TransportType::Tcp;
@@ -255,7 +237,7 @@ pub(crate) fn parse_config() -> AppConfig {
                     exit(-2);
                 }
                 Some(num) => {
-                    port_num = Some(num);
+                    port_num = Some(num as u16);
                     println!("TCP port {}", port_num.unwrap());
                 }
             }
@@ -277,7 +259,7 @@ pub(crate) fn parse_config() -> AppConfig {
                     exit(-2);
                 }
                 Some(num) => {
-                    port_num = Some(num);
+                    port_num = Some(num as u16);
                     println!("UDP port {}", port_num.unwrap());
                 }
             }
@@ -313,7 +295,7 @@ pub(crate) fn parse_config() -> AppConfig {
         }
         match port["nfqueue"].as_i64() {
             Some(queue) => {
-                nfqueue = Some(queue);
+                nfqueue = Some(queue as u16);
                 println!("  Receiving packets from nfqueue {}", queue);
                 println!("  Example iptables rule to make this work:");
                 println!(
@@ -331,6 +313,8 @@ pub(crate) fn parse_config() -> AppConfig {
                 port_type,
                 banner,
                 nfqueue,
+                bind_ip: bind_ip,
+                io_timeout
             },
         )
     }
