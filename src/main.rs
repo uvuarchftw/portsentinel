@@ -24,8 +24,8 @@ use chrono::Local;
 use mhteams::{Fact, Image, Message, Section};
 use reqwest::blocking::Client;
 
-use listeners::{lurk_tcp, lurk_udp, nfq_callback, parse_text};
-use settings::{parse_config, load_defaults};
+use listeners::{listen_tcp, listen_udp, nfq_callback};
+use settings::parse_config;
 use types::*;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -33,12 +33,9 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 fn main() {
     println!("PortSentinel v{}", VERSION);
     println!("{}", str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n"));
-    let default_settings: AppConfig = load_defaults();
-    let settings1: AppConfig = parse_config(default_settings);
-
+    let app_settings: AppConfig = parse_config();
     let (log_tx, log_rx) = channel();
-
-    let settings = settings1.clone();
+    let settings = app_settings.clone();
     thread::spawn(move || {
         // Logging thread
         let client = Client::new();
@@ -64,23 +61,23 @@ fn main() {
             }
         }
     });
-    let settings = settings1.clone();
 
+    let settings = app_settings.clone();
     for port in &settings.ports {
         let logchan = log_tx.clone();
         match port.port_type {
             TransportType::Tcp => {
                 let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
                 match TcpListener::bind(bind_addr.clone()) {
-                    Ok(socket) => lurk_tcp(socket, settings.clone(), logchan, port.clone()),
-                    Err(e) => println!("ERROR binding to {} {}", bind_addr, e.to_string()),
+                    Ok(socket) => listen_tcp(socket, settings.clone(), logchan, port.clone()),
+                    Err(e) => println!("ERROR binding to {} TCP {}", bind_addr, e.to_string()),
                 };
             },
             TransportType::Udp => {
                 let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
                 match UdpSocket::bind(bind_addr.clone()) {
-                    Ok(socket) => lurk_udp(socket, logchan, settings.clone(), port.clone()),
-                    Err(e) => println!("ERROR binding to {} {}", bind_addr, e.to_string()),
+                    Ok(socket) => listen_udp(socket, settings.clone(), logchan, port.clone()),
+                    Err(e) => println!("ERROR binding to {} UDP {}", bind_addr, e.to_string()),
                 };
             },
             TransportType::Icmp => {},

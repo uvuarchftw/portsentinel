@@ -5,7 +5,7 @@ use std::time::Duration;
 use types::*;
 use yaml_rust::YamlLoader;
 
-pub(crate) fn load_defaults() -> AppConfig {
+fn load_defaults() -> AppConfig {
     let app = AppConfig {
         bind_ip: String::new(),
         file_logging: false,
@@ -34,7 +34,8 @@ pub(crate) fn load_defaults() -> AppConfig {
     return app;
 }
 
-pub(crate) fn parse_config(mut app: AppConfig) -> AppConfig {
+pub(crate) fn parse_config() -> AppConfig {
+    let mut app: AppConfig = load_defaults();
     let mut config_str = String::new();
     let mut file = match File::open("config.yaml") {
         Ok(file) => file,
@@ -313,7 +314,7 @@ pub(crate) fn parse_config(mut app: AppConfig) -> AppConfig {
                 port_type,
                 banner,
                 nfqueue,
-                bind_ip: bind_ip,
+                bind_ip,
                 io_timeout
             },
         )
