@@ -224,7 +224,7 @@ pub(crate) fn parse_config() -> AppConfig {
     println!("\nStarting listeners on the following ports:");
     for port in config["ports"].as_vec().unwrap() {
         let mut port_num: Option<u16> = None;
-        let mut port_type: TransportType = TransportType::Tcp;
+        let port_type: TransportType;
         let mut banner: Option<String> = None;
         let mut nfqueue:Option<u16> = None;
         let bind_ip = app.bind_ip.clone();

@@ -21,7 +21,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
-use mhteams::{Fact, Image, Message, Section};
+use mhteams::Message;
 use reqwest::blocking::Client;
 
 use listeners::{listen_tcp, listen_udp, nfq_callback};
@@ -65,22 +65,27 @@ fn main() {
     let settings = app_settings.clone();
     for port in &settings.ports {
         let logchan = log_tx.clone();
-        match port.port_type {
-            TransportType::Tcp => {
-                let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
-                match TcpListener::bind(bind_addr.clone()) {
-                    Ok(socket) => listen_tcp(socket, settings.clone(), logchan, port.clone()),
-                    Err(e) => println!("ERROR binding to {} TCP {}", bind_addr, e.to_string()),
-                };
-            },
-            TransportType::Udp => {
-                let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
-                match UdpSocket::bind(bind_addr.clone()) {
-                    Ok(socket) => listen_udp(socket, settings.clone(), logchan, port.clone()),
-                    Err(e) => println!("ERROR binding to {} UDP {}", bind_addr, e.to_string()),
-                };
-            },
-            TransportType::Icmp => {},
+        if port.nfqueue.is_some() {
+
+        }
+        else {
+            match port.port_type {
+                TransportType::Tcp => {
+                    let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
+                    match TcpListener::bind(bind_addr.clone()) {
+                        Ok(socket) => listen_tcp(socket, settings.clone(), logchan, port.clone()),
+                        Err(e) => println!("ERROR binding to {} TCP {}", bind_addr, e.to_string()),
+                    };
+                },
+                TransportType::Udp => {
+                    let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
+                    match UdpSocket::bind(bind_addr.clone()) {
+                        Ok(socket) => listen_udp(socket, settings.clone(), logchan, port.clone()),
+                        Err(e) => println!("ERROR binding to {} UDP {}", bind_addr, e.to_string()),
+                    };
+                },
+                TransportType::Icmp => {},
+            }
         }
     }
 

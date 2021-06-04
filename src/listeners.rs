@@ -101,7 +101,6 @@ pub fn listen_tcp(
                 loop {
                     // Wait for response
                     let mut buf: [u8; 4096] = [0; 4096];
-                    let print_disconnect = print_disconnect;
                     match stream.read(&mut buf) {
                         Ok(tcp_stream_length) => {
                             if tcp_stream_length == 0 {
@@ -182,8 +181,6 @@ pub fn listen_udp(
     meta_port: Port,
 ) {
     thread::spawn(move || {
-        let bind_ip = &settings.bind_ip;
-        let meta_port = meta_port.clone();
         println!("Bound to UDP {}:{}", meta_port.bind_ip, meta_port.port_num.unwrap());
         loop {
             let mut buf = [0; 4096];
@@ -194,7 +191,7 @@ pub fn listen_udp(
             // Send banner
             socket
                 .send_to(banner.as_bytes(), src_addr.to_string())
-                .expect("couldn't send data");
+                .expect("Could not send data");
 
             if logchan
                 .send(LogEntry::LogEntryStart {
@@ -202,7 +199,7 @@ pub fn listen_udp(
                     transporttype: TransportType::Udp,
                     remoteip: src_addr.ip().to_string(),
                     remoteport: src_addr.port(),
-                    localip: bind_ip.to_string(),
+                    localip: settings.bind_ip.clone(),
                     localport: meta_port.port_num.unwrap() as u16,
                 })
                 .is_err()
