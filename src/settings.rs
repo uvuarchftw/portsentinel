@@ -226,7 +226,7 @@ pub(crate) fn parse_config() -> AppConfig {
         let mut port_num: Option<u16> = None;
         let port_type: TransportType;
         let mut banner: Option<String> = None;
-        let mut nfqueue:Option<u16> = None;
+        let mut nfqueue: Option<u16> = None;
         let bind_ip = app.bind_ip.clone();
         let io_timeout = app.io_timeout;
 
@@ -315,7 +315,7 @@ pub(crate) fn parse_config() -> AppConfig {
                 banner,
                 nfqueue,
                 bind_ip,
-                io_timeout
+                io_timeout,
             },
         )
     }

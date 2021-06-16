@@ -102,15 +102,11 @@ pub struct Port {
 }
 
 pub struct State {
-    pub(crate) ports: Vec<u16>,
-    pub(crate) logchan: Sender<LogEntry>,
+    pub(crate) count: u32,
 }
 
 impl State {
-    pub fn new(logchan: Sender<LogEntry>) -> State {
-        State {
-            ports: vec![],
-            logchan,
-        }
+    pub fn new() -> State {
+        State { count: 0 }
     }
 }

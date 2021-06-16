@@ -66,9 +66,26 @@ fn main() {
     for port in &settings.ports {
         let logchan = log_tx.clone();
         if port.nfqueue.is_some() {
+            let mut q = nfqueue::Queue::new(State::new());
+            q.open();
 
-        }
-        else {
+            println!("nfqueue example program: print packets metadata and accept packets");
+
+            q.unbind(libc::AF_INET); // ignore result, failure is not critical here
+
+            let rc = q.bind(libc::AF_INET);
+            if rc != 0 {
+                println!("Unable to bind to nfqueue. Are you root?");
+                continue;
+            } else {
+                println!("Successfully bound to nfqueue {}", 0);
+            }
+
+            q.create_queue(0, nfq_callback);
+            q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
+
+            q.run_loop();
+        } else {
             match port.port_type {
                 TransportType::Tcp => {
                     let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
@@ -76,15 +93,15 @@ fn main() {
                         Ok(socket) => listen_tcp(socket, settings.clone(), logchan, port.clone()),
                         Err(e) => println!("ERROR binding to {} TCP {}", bind_addr, e.to_string()),
                     };
-                },
+                }
                 TransportType::Udp => {
                     let bind_addr = format!("{}:{}", port.bind_ip, port.port_num.unwrap());
                     match UdpSocket::bind(bind_addr.clone()) {
                         Ok(socket) => listen_udp(socket, settings.clone(), logchan, port.clone()),
                         Err(e) => println!("ERROR binding to {} UDP {}", bind_addr, e.to_string()),
                     };
-                },
-                TransportType::Icmp => {},
+                }
+                TransportType::Icmp => {}
             }
         }
     }
