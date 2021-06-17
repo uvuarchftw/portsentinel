@@ -1,6 +1,26 @@
 use std::fmt;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
+use ipnet::IpNet;
+use serde::{de, Deserialize, Deserializer};
+use config::{Config, ConfigError};
+
+pub(crate) trait ShowSettings {
+    fn settings(&self) -> AppConfig;
+    fn parse_settings(&self) -> Option<ConfigError>;
+}
+
+impl ShowSettings for Config {
+    fn settings<'e>(&self) -> AppConfig {
+        let config = self.clone().try_into::<'e, AppConfig>().expect("Unable to parse settings");
+        return config;
+    }
+
+    fn parse_settings<'e>(&self) -> Option<ConfigError>{
+        let config = self.clone().try_into::<'e, AppConfig>().err();
+        return config;
+    }
+}
 
 #[derive(Clone)]
 pub struct ScreenConfig {
@@ -24,19 +44,23 @@ pub struct TeamsLoggingConfig {
     pub(crate) log_disconnect: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
-    pub(crate) bind_ip: String,
+    // pub(crate) bind_ips: Vec<IpNet>,
+    // pub(crate) blacklist_hosts: Vec<IpNet>,
+    pub(crate) exit_on_error: bool,
+    pub(crate) print_config: bool,
+    pub(crate) captured_text_newline_separator: String,
+    pub(crate) screen_logging: bool,
     pub(crate) file_logging: bool,
     pub(crate) teams_logging: bool,
-    pub(crate) captured_text_newline_seperator: String,
 
-    pub(crate) screen_config: ScreenConfig,
-    pub(crate) file_logging_config: FileLoggingConfig,
-    pub(crate) teams_logging_config: TeamsLoggingConfig,
-
-    pub(crate) io_timeout: Duration,
-    pub(crate) ports: Vec<Port>,
+    // pub(crate) screen_config: ScreenConfig,
+    // pub(crate) file_logging_config: FileLoggingConfig,
+    // pub(crate) teams_logging_config: TeamsLoggingConfig,
+    //
+    // pub(crate) io_timeout: Duration,
+    // pub(crate) ports: Vec<Port>,
 }
 
 #[derive(PartialEq, Eq, Clone)]

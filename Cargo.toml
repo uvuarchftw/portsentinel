@@ -5,8 +5,11 @@ authors = ["Dallen Bishop <dallen.bishop@uvu.edu>"]
 license = "MIT"
 
 [dependencies]
-yaml-rust = "0.4"
-lazy_static = "1.4.0"
+config = "^0.11"
+lazy_static = "1"
+notify = "^4.0.0"
+serde = { version = "1.0", features = ["derive"] }
+ipnet = { version = "2.3.1", features = ["serde"] }
 regex = "1"
 chrono = "0.4"
 nfqueue = "0.9"
