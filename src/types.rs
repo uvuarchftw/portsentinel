@@ -3,7 +3,8 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 use ipnet::IpNet;
 use serde::{de, Deserialize, Deserializer};
-use config::{Config, ConfigError};
+use config::{Config, ConfigError, Value};
+use std::collections::HashMap;
 
 pub(crate) trait ShowSettings {
     fn settings(&self) -> AppConfig;
@@ -22,21 +23,21 @@ impl ShowSettings for Config {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ScreenConfig {
     pub(crate) print_ascii: bool,
     pub(crate) print_hex: bool,
     pub(crate) print_disconnect: bool,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FileLoggingConfig {
     pub(crate) log_ascii: bool,
     pub(crate) log_hex: bool,
     pub(crate) log_disconnect: bool,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TeamsLoggingConfig {
     pub(crate) channel_url: String,
     pub(crate) log_ascii: bool,
@@ -46,20 +47,28 @@ pub struct TeamsLoggingConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
-    // pub(crate) bind_ips: Vec<IpNet>,
-    // pub(crate) blacklist_hosts: Vec<IpNet>,
+    pub(crate) bind_ips: Vec<IpNet>,
+    pub(crate) blacklist_hosts: Vec<IpNet>,
     pub(crate) exit_on_error: bool,
     pub(crate) print_config: bool,
     pub(crate) captured_text_newline_separator: String,
+    #[serde(rename = "io_timeout_seconds")]
+    pub(crate) io_timeout: u32,
     pub(crate) screen_logging: bool,
     pub(crate) file_logging: bool,
     pub(crate) teams_logging: bool,
 
-    // pub(crate) screen_config: ScreenConfig,
-    // pub(crate) file_logging_config: FileLoggingConfig,
-    // pub(crate) teams_logging_config: TeamsLoggingConfig,
-    //
-    // pub(crate) io_timeout: Duration,
+    #[serde(flatten)]
+    pub unused: HashMap<String, Value>,
+
+    #[serde(rename = "screen")]
+    pub(crate) screen_config: ScreenConfig,
+    #[serde(rename = "file")]
+    pub(crate) file_logging_config: FileLoggingConfig,
+    #[serde(rename = "teams")]
+    pub(crate) teams_logging_config: TeamsLoggingConfig,
+
+
     // pub(crate) ports: Vec<Port>,
 }
 

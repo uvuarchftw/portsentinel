@@ -1,13 +1,19 @@
-general:
-  bind_ip: "0.0.0.0"
-  file_logging: true
-  teams_logging: false
-  captured_text_newline_seperator: "."
+bind_ips:
+  - "0.0.0.0/0"
+  - "127.0.0.1/2"
+blacklist_hosts:
+  - "10.0.0.0/24"
+exit_on_error: true
+captured_text_newline_separator: "."
+io_timeout_seconds: 30
+print_config: true
+file_logging: true
+teams_logging: false
 screen:
-  print_ascii: false
+  print_ascii: true
   print_hex: false
   print_disconnect: false
-file_logging:
+file:
   log_ascii: false
   log_hex: true
   log_disconnect: false
@@ -16,10 +22,3 @@ teams:
   log_ascii: false
   log_hex: false
   log_disconnect: false
-ports:
-  - tcp: 2222
-    banner: "SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3\r\n"
-  - tcp: 8080
-    nfqueue: 0
-  - udp: 5400
-    banner: "SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3\r\n"
