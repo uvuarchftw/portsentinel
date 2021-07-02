@@ -23,6 +23,14 @@ impl ShowSettings for Config {
     }
 }
 
+fn de_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    let duration = u32::deserialize(deserializer)?;
+    Ok(Duration::from_secs(duration as u64))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScreenConfig {
     pub(crate) print_ascii: bool,
@@ -47,19 +55,17 @@ pub struct TeamsLoggingConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
-    pub(crate) bind_ips: Vec<IpNet>,
+    // pub(crate) bind_ips: Vec<IpNet>,
     pub(crate) blacklist_hosts: Vec<IpNet>,
     pub(crate) exit_on_error: bool,
     pub(crate) print_config: bool,
     pub(crate) captured_text_newline_separator: String,
     #[serde(rename = "io_timeout_seconds")]
-    pub(crate) io_timeout: u32,
+    #[serde(deserialize_with = "de_duration")]
+    pub(crate) io_timeout: Duration,
     pub(crate) screen_logging: bool,
     pub(crate) file_logging: bool,
     pub(crate) teams_logging: bool,
-
-    #[serde(flatten)]
-    pub unused: HashMap<String, Value>,
 
     #[serde(rename = "screen")]
     pub(crate) screen_config: ScreenConfig,
@@ -68,23 +74,26 @@ pub struct AppConfig {
     #[serde(rename = "teams")]
     pub(crate) teams_logging_config: TeamsLoggingConfig,
 
+    #[serde(default)]
+    pub(crate) ports: Vec<Port>,
 
-    // pub(crate) ports: Vec<Port>,
+    #[serde(flatten)]
+    pub unused: HashMap<String, Value>,
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug, Deserialize)]
 pub enum TransportType {
-    Tcp,
-    Udp,
-    Icmp,
+    tcp,
+    udp,
+    icmp,
 }
 
 impl fmt::Display for TransportType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            TransportType::Tcp => write!(f, "TCP"),
-            TransportType::Udp => write!(f, "UDP"),
-            TransportType::Icmp => write!(f, "ICMP"),
+            TransportType::tcp => write!(f, "TCP"),
+            TransportType::udp => write!(f, "UDP"),
+            TransportType::icmp => write!(f, "ICMP"),
         }
     }
 }
@@ -124,13 +133,16 @@ pub enum LogEntry {
     },
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Port {
     pub(crate) port_num: Option<u16>,
     pub(crate) port_type: TransportType,
+    #[serde(skip)]
     pub(crate) banner: Option<String>,
+    #[serde(skip)]
     pub(crate) nfqueue: Option<u16>,
-    pub(crate) bind_ip: String,
+    pub(crate) bind_ip: IpNet,
+    #[serde(deserialize_with = "de_duration")]
     pub(crate) io_timeout: Duration,
 }
 
