@@ -152,19 +152,19 @@ pub enum LogEntry {
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum PortType {
-    SinglePortNfqueueIoTimeout {
-        port_type: TransportType,
-        port_num: u16,
-        nfqueue: u16,
-        bind_ip: IpNet,
-        #[serde(deserialize_with = "de_duration")]
-        io_timeout: Duration,
-    },
     SinglePortNfqueue {
         port_type: TransportType,
         port_num: u16,
         nfqueue: u16,
         bind_ip: IpNet,
+    },
+    SinglePortBannerIoTimeout {
+        port_type: TransportType,
+        port_num: u16,
+        banner: String,
+        bind_ip: IpNet,
+        #[serde(deserialize_with = "de_duration")]
+        io_timeout: Duration,
     },
     SinglePortBanner {
         port_type: TransportType,
@@ -172,10 +172,48 @@ pub enum PortType {
         banner: String,
         bind_ip: IpNet,
     },
+    SinglePortIoTimeout {
+        port_type: TransportType,
+        port_num: u16,
+        bind_ip: IpNet,
+        #[serde(deserialize_with = "de_duration")]
+        io_timeout: Duration,
+    },
     SinglePort {
         port_type: TransportType,
         port_num: u16,
         bind_ip: IpNet,
+    },
+    MultiPortNfqueue {
+        port_type: TransportType,
+        #[serde(deserialize_with = "de_range")]
+        port_range: Range<u16>,
+        bind_ip: IpNet,
+        nfqueue: u16,
+    },
+    MultiPortBannerIoTimeout {
+        port_type: TransportType,
+        #[serde(deserialize_with = "de_range")]
+        port_range: Range<u16>,
+        banner: String,
+        bind_ip: IpNet,
+        #[serde(deserialize_with = "de_duration")]
+        io_timeout: Duration,
+    },
+    MultiPortBanner {
+        port_type: TransportType,
+        #[serde(deserialize_with = "de_range")]
+        port_range: Range<u16>,
+        banner: String,
+        bind_ip: IpNet,
+    },
+    MultiPortIoTimeout {
+        port_type: TransportType,
+        #[serde(deserialize_with = "de_range")]
+        port_range: Range<u16>,
+        bind_ip: IpNet,
+        #[serde(deserialize_with = "de_duration")]
+        io_timeout: Duration,
     },
     MultiPort {
         port_type: TransportType,
@@ -184,26 +222,6 @@ pub enum PortType {
         bind_ip: IpNet,
     }
 }
-
-// #[derive(Debug, Clone, Deserialize)]
-// pub struct Port {
-//     pub(crate) port_num: u16,
-//     pub(crate) port_type: TransportType,
-//     pub(crate) banner: String,
-//     pub(crate) nfqueue: u16,
-//     pub(crate) bind_ip: IpNet,
-//     #[serde(deserialize_with = "de_duration")]
-//     pub(crate) io_timeout: Duration,
-// }
-//
-// #[derive(Debug, Clone, Deserialize)]
-// pub struct Port2 {
-//     pub(crate) port_num: u16,
-//     pub(crate) port_type: TransportType,
-//     pub(crate) banner: String,
-//     pub(crate) nfqueue: u16,
-//     pub(crate) bind_ip: IpNet,
-// }
 
 pub struct State {
     pub(crate) count: u32,
