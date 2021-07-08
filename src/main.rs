@@ -44,6 +44,8 @@ use config::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use notify::{RecommendedWatcher, DebouncedEvent, Watcher, RecursiveMode};
+use std::thread::sleep;
+use std::convert::TryInto;
 
 lazy_static::lazy_static! {
     static ref SETTINGS: RwLock<Config> = RwLock::new({
@@ -56,6 +58,15 @@ lazy_static::lazy_static! {
 fn main() {
     println!("PortSentinel v{}", VERSION);
     println!("{}", str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n"));
+
+    thread::spawn(move || {
+        sleep(Duration::new(2,0));
+        let settings = SETTINGS.read().unwrap().settings();
+        for port in settings.ports.iter()  {
+            println!("{:#?}", port);
+        }
+
+    });
 
     // let (log_tx, log_rx) = channel();
     // thread::spawn(move || {

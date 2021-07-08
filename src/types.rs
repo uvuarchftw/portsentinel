@@ -5,6 +5,8 @@ use ipnet::IpNet;
 use serde::{de, Deserialize, Deserializer};
 use config::{Config, ConfigError, Value};
 use std::collections::HashMap;
+use std::ops::Range;
+use serde::de::Error;
 
 pub(crate) trait ShowSettings {
     fn settings(&self) -> AppConfig;
@@ -29,6 +31,20 @@ fn de_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
 {
     let duration = u32::deserialize(deserializer)?;
     Ok(Duration::from_secs(duration as u64))
+}
+
+fn de_range<'de, D>(deserializer: D) -> Result<Range<u16>, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    let range_str = String::deserialize(deserializer)?;
+    let range: Vec<u16> = range_str.split("..").map(|x| x.parse::<u16>().unwrap()).collect();
+    
+    if range.len() != 2 || range[0] > range[1] {
+        eprintln!("Invalid port range specified ({}..{})", range[0], range[1]);
+        return Err(D::Error::custom("Bad port range"));
+    }
+    Ok(range[0]..range[1])
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,7 +91,7 @@ pub struct AppConfig {
     pub(crate) teams_logging_config: TeamsLoggingConfig,
 
     #[serde(default)]
-    pub(crate) ports: Vec<Port>,
+    pub(crate) ports: Vec<PortType>,
 
     #[serde(flatten)]
     pub unused: HashMap<String, Value>,
@@ -133,18 +149,61 @@ pub enum LogEntry {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Port {
-    pub(crate) port_num: Option<u16>,
-    pub(crate) port_type: TransportType,
-    #[serde(skip)]
-    pub(crate) banner: Option<String>,
-    #[serde(skip)]
-    pub(crate) nfqueue: Option<u16>,
-    pub(crate) bind_ip: IpNet,
-    #[serde(deserialize_with = "de_duration")]
-    pub(crate) io_timeout: Duration,
+#[derive(PartialEq, Eq, Clone, Debug, Deserialize)]
+#[serde(untagged)]
+pub enum PortType {
+    SinglePortNfqueueIoTimeout {
+        port_type: TransportType,
+        port_num: u16,
+        nfqueue: u16,
+        bind_ip: IpNet,
+        #[serde(deserialize_with = "de_duration")]
+        io_timeout: Duration,
+    },
+    SinglePortNfqueue {
+        port_type: TransportType,
+        port_num: u16,
+        nfqueue: u16,
+        bind_ip: IpNet,
+    },
+    SinglePortBanner {
+        port_type: TransportType,
+        port_num: u16,
+        banner: String,
+        bind_ip: IpNet,
+    },
+    SinglePort {
+        port_type: TransportType,
+        port_num: u16,
+        bind_ip: IpNet,
+    },
+    MultiPort {
+        port_type: TransportType,
+        #[serde(deserialize_with = "de_range")]
+        port_range: Range<u16>,
+        bind_ip: IpNet,
+    }
 }
+
+// #[derive(Debug, Clone, Deserialize)]
+// pub struct Port {
+//     pub(crate) port_num: u16,
+//     pub(crate) port_type: TransportType,
+//     pub(crate) banner: String,
+//     pub(crate) nfqueue: u16,
+//     pub(crate) bind_ip: IpNet,
+//     #[serde(deserialize_with = "de_duration")]
+//     pub(crate) io_timeout: Duration,
+// }
+//
+// #[derive(Debug, Clone, Deserialize)]
+// pub struct Port2 {
+//     pub(crate) port_num: u16,
+//     pub(crate) port_type: TransportType,
+//     pub(crate) banner: String,
+//     pub(crate) nfqueue: u16,
+//     pub(crate) bind_ip: IpNet,
+// }
 
 pub struct State {
     pub(crate) count: u32,
