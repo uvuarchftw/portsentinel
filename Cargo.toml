@@ -19,3 +19,4 @@ uuid = { version = "0.8.1", features = ["v4"] }
 hex = "0.4.2"
 mhteams = "0.1.0"
 reqwest = { version = "0.10", features = ["blocking", "json"] }
+crossbeam-channel = "0.5"

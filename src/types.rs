@@ -1,11 +1,10 @@
 use std::fmt;
-use std::sync::mpsc::Sender;
 use std::time::Duration;
 use ipnet::IpNet;
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer};
 use config::{Config, ConfigError, Value};
 use std::collections::HashMap;
-use std::ops::Range;
+use std::ops::{RangeInclusive};
 use serde::de::Error;
 
 pub(crate) trait ShowSettings {
@@ -33,18 +32,25 @@ fn de_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
     Ok(Duration::from_secs(duration as u64))
 }
 
-fn de_range<'de, D>(deserializer: D) -> Result<Range<u16>, D::Error>
+fn de_range<'de, D>(deserializer: D) -> Result<RangeInclusive<u16>, D::Error>
     where
         D: Deserializer<'de>,
 {
     let range_str = String::deserialize(deserializer)?;
-    let range: Vec<u16> = range_str.split("..").map(|x| x.parse::<u16>().unwrap()).collect();
-    
-    if range.len() != 2 || range[0] > range[1] {
+    let range: Vec<u16> = range_str.split("..").map(|x| { let result = x.parse::<u16>(); match result {
+        Ok(x) => {x}
+        Err(_) => {0}
+    }}).collect();
+
+    if range[0] == 0 || range[1] == 0 {
+        eprintln!("Invalid characters in port range specified ({})", range_str);
+        return Err(D::Error::custom("Bad characters in port range"));
+    }
+    else if range.len() != 2 || range[0] > range[1] {
         eprintln!("Invalid port range specified ({}..{})", range[0], range[1]);
         return Err(D::Error::custom("Bad port range"));
     }
-    Ok(range[0]..range[1])
+    Ok(range[0]..=range[1])
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,6 +62,7 @@ pub struct ScreenConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FileLoggingConfig {
+    pub(crate) log_filepath: String,
     pub(crate) log_ascii: bool,
     pub(crate) log_hex: bool,
     pub(crate) log_disconnect: bool,
@@ -187,14 +194,14 @@ pub enum PortType {
     MultiPortNfqueue {
         port_type: TransportType,
         #[serde(deserialize_with = "de_range")]
-        port_range: Range<u16>,
+        port_range: RangeInclusive<u16>,
         bind_ip: IpNet,
         nfqueue: u16,
     },
     MultiPortBannerIoTimeout {
         port_type: TransportType,
         #[serde(deserialize_with = "de_range")]
-        port_range: Range<u16>,
+        port_range: RangeInclusive<u16>,
         banner: String,
         bind_ip: IpNet,
         #[serde(deserialize_with = "de_duration")]
@@ -203,14 +210,14 @@ pub enum PortType {
     MultiPortBanner {
         port_type: TransportType,
         #[serde(deserialize_with = "de_range")]
-        port_range: Range<u16>,
+        port_range: RangeInclusive<u16>,
         banner: String,
         bind_ip: IpNet,
     },
     MultiPortIoTimeout {
         port_type: TransportType,
         #[serde(deserialize_with = "de_range")]
-        port_range: Range<u16>,
+        port_range: RangeInclusive<u16>,
         bind_ip: IpNet,
         #[serde(deserialize_with = "de_duration")]
         io_timeout: Duration,
@@ -218,9 +225,24 @@ pub enum PortType {
     MultiPort {
         port_type: TransportType,
         #[serde(deserialize_with = "de_range")]
-        port_range: Range<u16>,
+        port_range: RangeInclusive<u16>,
         bind_ip: IpNet,
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PortSpec {
+    pub(crate) port_type: TransportType,
+    pub(crate) port_range: RangeInclusive<u16>,
+    pub(crate) banner: Option<String>,
+    pub(crate) bind_ip: IpNet,
+    pub(crate) nfqueue: Option<u16>,
+    pub(crate) io_timeout: Duration
+}
+
+pub struct DieRequest {
+    pub(crate) nfqueue: bool,
+    pub(crate) port_num: u16,
 }
 
 pub struct State {
