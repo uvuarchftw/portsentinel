@@ -1,6 +1,4 @@
 use config::{Config, File};
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use std::process::exit;
 use CFG_FILEPATHS;
 
 fn load_defaults() -> Config {

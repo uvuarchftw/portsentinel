@@ -1,13 +1,12 @@
 use config::{Config, ConfigError, Value};
-use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, Sender};
 use ipnet::IpNet;
 use listeners::{nfq_callback, parse_ascii};
-use regex::internal::Input;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, UdpSocket};
+use std::net::{TcpListener, UdpSocket};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -93,7 +92,6 @@ pub struct TeamsLoggingConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
-    // pub(crate) bind_ips: Vec<IpNet>,
     pub(crate) blacklist_hosts: Vec<IpNet>,
     pub(crate) exit_on_error: bool,
     pub(crate) print_config: bool,
@@ -272,6 +270,7 @@ pub struct Listener {
 }
 
 impl Listener {
+    /// Create and start a port listener
     pub(crate) fn new(
         port_spec: PortSpec,
         settings: AppConfig,
@@ -303,6 +302,7 @@ impl Listener {
         return new_port_listener;
     }
 
+    /// Bind to NFQueue for port traffic
     fn bind_nfqueue(&mut self) {
         let mut q = nfqueue::Queue::new(State::new());
         q.open();
@@ -323,26 +323,25 @@ impl Listener {
         }
     }
 
+    /// Bind port to address directly
     fn bind_port(&mut self) {
         let bind_addr = format!("{}:{}", self.bind_ip.addr(), self.port_num);
         match self.port_type {
             TransportType::tcp => {
                 match TcpListener::bind(bind_addr.clone()) {
                     Ok(socket) => {
-                        socket.set_nonblocking(true);
+                        let _ = socket.set_nonblocking(true);
                         self.socket = Some(Sockets::Tcp(socket));
                     }
-                    // listen_tcp(socket, settings.clone(), logchan.clone(), diechan.clone(),port_spec.clone(), port_num),
                     Err(e) => println!("ERROR binding to {} TCP {}", bind_addr, e.to_string()),
                 };
             }
             TransportType::udp => {
                 match UdpSocket::bind(bind_addr.clone()) {
                     Ok(socket) => {
-                        socket.set_nonblocking(true);
+                        let _ = socket.set_nonblocking(true);
                         self.socket = Some(Sockets::Udp(socket));
                     }
-                    // listen_udp(socket, settings.clone(), logchan.clone(), diechan.clone(),port_spec.clone(), port_num),
                     Err(e) => println!("ERROR binding to {} UDP {}", bind_addr, e.to_string()),
                 };
             }
@@ -359,38 +358,28 @@ impl Listener {
             hex_text += line;
         }
 
-        if self.settings.screen_config.print_ascii {
-            println!("{:>5} | {}", self.port_num, ascii_text);
-        }
-        if self.settings.screen_config.print_hex {
-            println!("{:>5} . {}", self.port_num, hex_text);
-        }
-
-        if (self.settings.file_logging_config.log_ascii
-            || self.settings.teams_logging_config.log_ascii)
-            && self
-                .logchan
-                .send(LogEntry::LogEntryMsg {
-                    uuid: con_uuid,
-                    msg: ascii_text.parse().unwrap(),
-                    msgtype: LogMsgType::Plaintext,
-                    msglen: packets.len(),
-                })
-                .is_err()
+        if self
+            .logchan
+            .send(LogEntry::LogEntryMsg {
+                uuid: con_uuid,
+                msg: ascii_text.parse().unwrap(),
+                msgtype: LogMsgType::Plaintext,
+                msglen: packets.len(),
+            })
+            .is_err()
         {
             println!("Failed to write LogEntry to logging thread");
         }
 
-        if (self.settings.file_logging_config.log_hex || self.settings.teams_logging_config.log_hex)
-            && self
-                .logchan
-                .send(LogEntry::LogEntryMsg {
-                    uuid: con_uuid,
-                    msg: hex_text,
-                    msgtype: LogMsgType::Hex,
-                    msglen: packets.len(),
-                })
-                .is_err()
+        if self
+            .logchan
+            .send(LogEntry::LogEntryMsg {
+                uuid: con_uuid,
+                msg: hex_text,
+                msgtype: LogMsgType::Hex,
+                msglen: packets.len(),
+            })
+            .is_err()
         {
             println!("Failed to write LogEntry to logging thread");
         }
@@ -398,10 +387,6 @@ impl Listener {
 
     fn get_port_spec(&self) -> PortSpec {
         return self.port_spec.clone();
-    }
-
-    fn kill(&mut self) {
-        self.port_num = 0;
     }
 }
 
@@ -416,7 +401,7 @@ impl PortListener {
         settings: AppConfig,
         logchan: Sender<LogEntry>,
     ) -> PortListener {
-        let mut pl = PortListener {
+        let pl = PortListener {
             inner: Arc::new(Listener::new(port_spec.clone(), settings, logchan)),
         };
 
@@ -440,42 +425,29 @@ impl PortListener {
     }
 
     pub(crate) fn kill(&self) {
-        self.inner.die_tx.send(true);
+        let _ = self.inner.die_tx.send(true);
     }
 
     fn tcp_listener(&self) {
-        let local_self = self.inner.clone();
-        // thread::spawn(move || {
-        //     println!(
-        //         "Bound to TCP {}:{}",
-        //         local_self.bind_ip.addr(),
-        //         local_self.port_num
-        //     );
-        //
-        //     loop {
-        //
-        //         println!("THREAD {:#?}", thread::current().id());
-        //         println!("{:#?}", local_self.socket);
-        //         thread::sleep(Duration::new(2, 0));
-        //     }
-        // });
+        let listener_self = self.inner.clone();
         thread::spawn(move || {
-            match local_self.socket.as_ref() {
+            match listener_self.socket.as_ref() {
                 None => {}
                 Some(sockets) => {
                     match sockets {
+                        Sockets::Udp(_) => {}
                         Sockets::Tcp(socket) => {
                             println!(
                                 "Bound to TCP {}:{}",
-                                local_self.bind_ip.addr(),
-                                local_self.port_num
+                                listener_self.bind_ip.addr(),
+                                listener_self.port_num
                             );
                             for res in socket.incoming() {
                                 let mut stream = match res {
                                     Ok(stream) => stream,
-                                    Err(_e) => {
+                                    Err(_) => {
                                         // Kill thread if live configuration changes
-                                        match local_self.die_rx.try_recv() {
+                                        match listener_self.die_rx.try_recv() {
                                             Ok(_) => {
                                                 break;
                                             }
@@ -486,27 +458,27 @@ impl PortListener {
                                     }
                                 };
                                 stream
-                                    .set_read_timeout(Some(local_self.io_timeout))
+                                    .set_read_timeout(Some(listener_self.io_timeout))
                                     .expect("Failed to set read timeout on TcpStream");
                                 stream
-                                    .set_write_timeout(Some(local_self.io_timeout))
+                                    .set_write_timeout(Some(listener_self.io_timeout))
                                     .expect("Failed to set write timeout on TcpStream");
                                 let local = stream.local_addr().unwrap();
                                 let peer = match stream.peer_addr() {
                                     Ok(addr) => addr,
-                                    Err(e) => {
-                                        println!(
-                                            "{:>5} ? TCP ERR GETADDR: {}",
-                                            socket.local_addr().unwrap().port(),
-                                            e.to_string()
-                                        );
+                                    Err(_e) => {
+                                        // println!(
+                                        //     "{:>5} ? TCP ERR GETADDR: {}",
+                                        //     socket.local_addr().unwrap().port(),
+                                        //     e.to_string()
+                                        // );
                                         continue;
                                     }
                                 };
 
-                                println!("{:>5} + TCP ACK from {}", local.port(), peer);
+                                // println!("{:>5} + TCP ACK from {}", local.port(), peer);
                                 let con_uuid = Uuid::new_v4().to_hyphenated();
-                                if local_self
+                                if listener_self
                                     .logchan
                                     .send(LogEntry::LogEntryStart {
                                         uuid: con_uuid,
@@ -521,7 +493,7 @@ impl PortListener {
                                     println!("Failed to write LogEntry to logging thread");
                                 }
 
-                                let local_self = local_self.clone();
+                                let local_self = listener_self.clone();
                                 thread::spawn(move || {
                                     let banner =
                                         local_self.banner.clone().unwrap_or("".to_string());
@@ -530,21 +502,21 @@ impl PortListener {
                                     if banner.len() > 0 {
                                         match stream.write((*banner).as_bytes()) {
                                             Ok(_) => {}
-                                            Err(e) => {
-                                                if e.kind() == io::ErrorKind::WouldBlock {
-                                                    println!(
-                                                        "{:>5} - TCP WRITE TIMEOUT from {}",
-                                                        local.port(),
-                                                        peer
-                                                    );
-                                                } else {
-                                                    println!(
-                                                        "{:>5} - TCP ERR WRITE to {}: {}",
-                                                        local.port(),
-                                                        peer,
-                                                        e.to_string()
-                                                    );
-                                                }
+                                            Err(_) => {
+                                                // if e.kind() == io::ErrorKind::WouldBlock {
+                                                //     println!(
+                                                //         "{:>5} - TCP WRITE TIMEOUT from {}",
+                                                //         local.port(),
+                                                //         peer
+                                                //     );
+                                                // } else {
+                                                //     println!(
+                                                //         "{:>5} - TCP ERR WRITE to {}: {}",
+                                                //         local.port(),
+                                                //         peer,
+                                                //         e.to_string()
+                                                //     );
+                                                // }
                                                 return;
                                             }
                                         }
@@ -575,22 +547,22 @@ impl PortListener {
                                                     let duration = start.elapsed().as_secs() as f32
                                                         + start.elapsed().subsec_millis() as f32
                                                             / 1000.0;
-                                                    // use Duration::as_float_secs() here as soon as it stabilizes
-                                                    if print_disconnect {
-                                                        println!(
-                                                            "{:>5} - TCP FIN from {} after {:.1}s",
-                                                            local.port(),
-                                                            peer,
-                                                            duration
-                                                        );
-                                                    }
+                                                    // // use Duration::as_float_secs() here as soon as it stabilizes
+                                                    // if print_disconnect {
+                                                    //     println!(
+                                                    //         "{:>5} - TCP FIN from {} after {:.1}s",
+                                                    //         local.port(),
+                                                    //         peer,
+                                                    //         duration
+                                                    //     );
+                                                    // }
 
                                                     if log_disconnect
                                                         && local_self
                                                             .logchan
                                                             .send(LogEntry::LogEntryFinish {
                                                                 uuid: con_uuid,
-                                                                duration: duration,
+                                                                duration,
                                                             })
                                                             .is_err()
                                                     {
@@ -599,35 +571,35 @@ impl PortListener {
                                                     break;
                                                 }
 
-                                                local_self.log_packets(&buf, con_uuid);
+                                                local_self.log_packets(&buf[0..tcp_stream_length], con_uuid);
                                             }
-                                            Err(e) => {
-                                                if e.kind() == io::ErrorKind::WouldBlock {
-                                                    println!(
-                                                        "{:>5} - TCP READ TIMEOUT from {}",
-                                                        local.port(),
-                                                        peer
-                                                    );
-                                                } else {
-                                                    println!(
-                                                        "{:>5} - TCP ERR READ from {}: {}",
-                                                        local.port(),
-                                                        peer,
-                                                        e.to_string()
-                                                    );
-                                                }
+                                            Err(_) => {
+                                                // if e.kind() == io::ErrorKind::WouldBlock {
+                                                //     println!(
+                                                //         "{:>5} - TCP READ TIMEOUT from {}",
+                                                //         local.port(),
+                                                //         peer
+                                                //     );
+                                                // } else {
+                                                //     println!(
+                                                //         "{:>5} - TCP ERR READ from {}: {}",
+                                                //         local.port(),
+                                                //         peer,
+                                                //         e.to_string()
+                                                //     );
+                                                // }
                                                 break;
                                             }
                                         }
                                         match stream.take_error() {
                                             Ok(opt) => {
                                                 if opt.is_some() {
-                                                    println!(
-                                                        "{:>5} - TCP ERR from {}: {}",
-                                                        local.port(),
-                                                        peer,
-                                                        opt.unwrap().to_string()
-                                                    );
+                                                    // println!(
+                                                    //     "{:>5} - TCP ERR from {}: {}",
+                                                    //     local.port(),
+                                                    //     peer,
+                                                    //     opt.unwrap().to_string()
+                                                    // );
                                                     break;
                                                 }
                                             }
@@ -640,7 +612,6 @@ impl PortListener {
                                 });
                             }
                         }
-                        Sockets::Udp(_) => {}
                     }
                 }
             }
@@ -648,21 +619,21 @@ impl PortListener {
     }
 
     fn udp_listener(&self) {
-        let local_self = self.inner.clone();
+        let listener_self = self.inner.clone();
         // println!("{:#?}", local_self);
         thread::spawn(move || {
             println!(
                 "Bound to UDP {}:{}",
-                local_self.bind_ip.addr(),
-                local_self.port_num
+                listener_self.bind_ip.addr(),
+                listener_self.port_num
             );
 
-            match local_self.socket.as_ref().expect("UDP Socket unavailable") {
+            match listener_self.socket.as_ref().expect("UDP Socket unavailable") {
                 Sockets::Tcp(_) => {}
                 Sockets::Udp(socket) => {
-                    let banner = local_self.banner.clone().unwrap_or("".to_string());
+                    let banner = listener_self.banner.clone().unwrap_or("".to_string());
                     loop {
-                        match local_self.die_rx.try_recv() {
+                        match listener_self.die_rx.try_recv() {
                             Ok(_) => {
                                 break;
                             }
@@ -671,32 +642,30 @@ impl PortListener {
                         let mut buf = [0; 4096];
                         let con_uuid = Uuid::new_v4().to_hyphenated();
                         match socket.recv_from(&mut buf) {
-                            Ok((_number_of_bytes, src_addr)) => {
-                                println!("{}", src_addr);
-
+                            Ok((number_of_bytes, src_addr)) => {
                                 // Send banner
                                 socket
                                     .send_to(banner.as_bytes(), src_addr.to_string())
                                     .expect("Could not send data");
 
-                                if local_self
+                                if listener_self
                                     .logchan
                                     .send(LogEntry::LogEntryStart {
                                         uuid: con_uuid,
                                         transporttype: TransportType::udp,
                                         remoteip: src_addr.ip().to_string(),
                                         remoteport: src_addr.port(),
-                                        localip: local_self.bind_ip.to_string(),
-                                        localport: local_self.port_num,
+                                        localip: listener_self.bind_ip.addr().to_string(),
+                                        localport: listener_self.port_num,
                                     })
                                     .is_err()
                                 {
                                     println!("Failed to write LogEntry to logging thread");
                                 }
 
-                                local_self.log_packets(&buf, con_uuid);
+                                listener_self.log_packets(&buf[0..number_of_bytes], con_uuid);
                             }
-                            Err(_) => {
+                            Err(_err) => {
                                 thread::sleep(Duration::from_millis(50));
                             }
                         }

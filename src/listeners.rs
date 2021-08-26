@@ -1,19 +1,12 @@
-use std::io::prelude::*;
-use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, UdpSocket};
-use std::sync::mpsc::{Receiver as RReceiver, Sender as RSender};
-use std::time::Instant;
-use std::{io, thread};
+use std::net::IpAddr;
 
-use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use pnet::packet::icmp::{echo_reply, echo_request, IcmpPacket, IcmpTypes};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
-use uuid::Uuid;
 
-use hex;
 use types::*;
 
 fn handle_icmp_packet(id: u32, source: IpAddr, destination: IpAddr, packet: &[u8]) {

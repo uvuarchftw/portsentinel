@@ -19,18 +19,16 @@ pub mod types;
 
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::net::{TcpListener, UdpSocket};
 use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded};
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
-// use listeners::{listen_tcp, listen_udp, nfq_callback};
 use config::*;
 use settings::parse_config;
 use std::sync::mpsc::channel;
@@ -44,9 +42,10 @@ const CFG_FILEPATHS: [&str; 4] = [
     "config.yaml",
 ];
 
+// Global mutable settings variable
 lazy_static::lazy_static! {
     static ref SETTINGS: RwLock<Config> = RwLock::new({
-        let mut settings = parse_config();
+        let settings = parse_config();
 
         settings
     });
@@ -60,16 +59,20 @@ fn main() {
         show();
     }
 
+    // Logging channels
     let (log_tx, log_rx) = unbounded();
 
+    // Logging thread
     thread::spawn(move || {
-        let settings = SETTINGS.read().unwrap().settings();
-        // Logging thread
         let client = Client::new();
+        let settings = SETTINGS.read().unwrap().settings();
         loop {
             let conn: LogEntry = log_rx.recv().unwrap();
             let msg = parse_msg(conn);
 
+            if settings.screen_logging {
+                println!("{}", msg);
+            }
             if settings.file_logging {
                 let mut file = OpenOptions::new()
                     .append(true)
@@ -115,7 +118,7 @@ fn main() {
     // Create a channel to receive the write events to any configuration files
     let (tx, rx) = channel();
 
-    // Automatically select the best implementation for your platform.
+    // Automatically select the best implementation for the platform.
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2)).unwrap();
 
     let mut failed_paths: Vec<&str> = Vec::new();
@@ -200,7 +203,7 @@ fn main() {
                         refresh_result.unwrap()
                     );
                 } else {
-                    SETTINGS.write().unwrap().refresh();
+                    let _ = SETTINGS.write().unwrap().refresh();
                 }
 
                 let mut new_ports = Vec::new();
@@ -227,13 +230,12 @@ fn main() {
                         // if port.nfqueue.is_some() {
                         //     nfqueue = true;
                         // }
-                        // die_tx.send(DieRequest { nfqueue: nfqueue, port_num: port.port_range.into_inner().0 });
 
                         // Now find the corresponding port listener and drop the value to stop listening
                         for (index, listener) in listeners.to_vec().iter().enumerate() {
                             if listener.get_port_spec().eq(&port) {
-                                println!("PS: {:#?}", listener.get_port_spec());
-                                println!("PS2: {:#?}", &port);
+                                // println!("PS: {:#?}", listener.get_port_spec());
+                                // println!("PS2: {:#?}", &port);
                                 listener.kill();
                                 listeners.remove(index);
                             }
@@ -241,7 +243,7 @@ fn main() {
                     }
                 }
 
-                // Find port listeners that are new
+                // Find port listeners that need to be added
                 for port in new_ports.clone() {
                     if !old_ports.contains(&port) {
                         // println!("NEW: {:#?}", port);
@@ -265,7 +267,7 @@ fn main() {
 fn parse_msg(conn: LogEntry) -> String {
     let current_time = Local::now();
     let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
-    match conn {
+    return match conn {
         LogEntry::LogEntryStart {
             uuid,
             transporttype,
@@ -274,10 +276,10 @@ fn parse_msg(conn: LogEntry) -> String {
             remoteip,
             remoteport,
         } => {
-            return format!(
+            format!(
                 "[{}]: Connection-ID: {} {} DEST_IP {}:{} SRC_IP {}:{} ",
                 formatted_time, uuid, transporttype, localip, localport, remoteip, remoteport
-            );
+            )
         }
         LogEntry::LogEntryMsg {
             uuid,
@@ -285,16 +287,16 @@ fn parse_msg(conn: LogEntry) -> String {
             msgtype,
             msglen,
         } => {
-            return format!(
+            format!(
                 "[{}]: Connection-ID: {} {} {} Bytes: {}",
                 formatted_time, uuid, msgtype, msglen, msg
-            );
+            )
         }
         LogEntry::LogEntryFinish { uuid, duration } => {
-            return format!(
+            format!(
                 "[{}]: Connection-ID: {} Connection Duration: {} seconds",
                 formatted_time, uuid, duration
-            );
+            )
         }
     }
 }
