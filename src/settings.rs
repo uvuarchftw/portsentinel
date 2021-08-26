@@ -1,7 +1,7 @@
 use config::{Config, File};
 use CFG_FILEPATHS;
 
-fn load_defaults() -> Config {
+pub(crate) fn load_defaults() -> Config {
     let mut settings = config::Config::new();
     settings
         .set_default("exit_on_error", false)
@@ -21,26 +21,6 @@ fn load_defaults() -> Config {
     settings
         .set_default("io_timeout_seconds", 300)
         .expect("Cannot set default value for io_timeout setting");
-    return settings;
-}
-
-pub(crate) fn parse_config() -> Config {
-    let mut settings = load_defaults();
-    for path in CFG_FILEPATHS.iter() {
-        settings.merge(File::with_name("config.yaml")).unwrap();
-    }
-    // Change any single hosts not in CIDR notation to /32
-    // let bind_ips: Vec<String> = settings.get("bind_ips").unwrap();
-    // let mut mod_bind_ips: Vec<String> = ["".to_string()].to_vec();
-    // for ip in bind_ips {
-    // if ip.parse().is_err() {
-    //     mod_bind_ips.append(format!("{}/32", ip));
-    // }
-    // else {
-    //     mod_bind_ips.append(ip);
-    // }
-    // }
-    // settings.set("bind_ips", mod_bind_ips);
     return settings;
 }
 

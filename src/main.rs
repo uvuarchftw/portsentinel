@@ -30,7 +30,7 @@ use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
 use config::*;
-use settings::parse_config;
+use settings::load_defaults;
 use std::sync::mpsc::channel;
 use types::*;
 
@@ -45,7 +45,7 @@ const CFG_FILEPATHS: [&str; 4] = [
 // Global mutable settings variable
 lazy_static::lazy_static! {
     static ref SETTINGS: RwLock<Config> = RwLock::new({
-        let settings = parse_config();
+        let settings = load_defaults();
 
         settings
     });
@@ -54,6 +54,42 @@ lazy_static::lazy_static! {
 fn main() {
     println!("PortSentinel v{}", VERSION);
     println!("{}", str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n"));
+
+    //// Gather setting files
+    // Create a channel to receive the write events to any configuration files
+    let (tx, rx) = channel();
+    // Automatically select the best implementation for the platform.
+    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2)).unwrap();
+
+    let mut failed_paths: Vec<&str> = Vec::new();
+    let mut succeeded_paths: Vec<&str> = Vec::new();
+
+    // Add a path to be watched. All files and directories at that path and
+    // below will be monitored for changes.
+    for path in CFG_FILEPATHS.iter() {
+        let res = watcher.watch(path, RecursiveMode::NonRecursive);
+        match res {
+            Ok(_) => {
+                println!("Using file: {}", path);
+                succeeded_paths.push(path);
+                let test = SETTINGS.read().unwrap().parse_settings(path.to_string());
+                match test {
+                    None => {
+                        // Add the new file to the global settings
+                        SETTINGS.write().unwrap().add_source(path.to_string());
+                    }
+                    Some(err) => {
+                        println!("Configuration Error: {}", err);
+                    }
+                }
+            }
+            Err(_) => {
+                println!("Unable to find file: {}", path);
+                failed_paths.push(path);
+            }
+        }
+    }
+
     let settings = SETTINGS.read().unwrap().settings();
     if settings.print_config {
         show();
@@ -106,7 +142,6 @@ fn main() {
                 nfqueue: port_spec.nfqueue,
                 io_timeout: port_spec.io_timeout,
             };
-            // println!("{}", single_port_spec.banner.as_ref().unwrap());
             listeners.push(PortListener::new(
                 single_port_spec,
                 settings.clone(),
@@ -115,70 +150,15 @@ fn main() {
         }
     }
 
-    // Create a channel to receive the write events to any configuration files
-    let (tx, rx) = channel();
 
-    // Automatically select the best implementation for the platform.
-    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2)).unwrap();
-
-    let mut failed_paths: Vec<&str> = Vec::new();
-    let mut succeeded_paths: Vec<&str> = Vec::new();
-
-    // Add a path to be watched. All files and directories at that path and
-    // below will be monitored for changes.
-    for path in CFG_FILEPATHS.iter() {
-        let res = watcher.watch(path, RecursiveMode::NonRecursive);
-        match res {
-            Ok(_) => {
-                println!("Using file: {}", path);
-                succeeded_paths.push(path);
-            }
-            Err(_) => {
-                println!("Unable to find file: {}", path);
-                failed_paths.push(path);
-            }
-        }
-    }
 
     loop {
-        match rx.recv() {
+        match rx.try_recv() {
             Ok(DebouncedEvent::Write(path)) => {
                 println!(
                     " * {} written; refreshing configuration ...",
                     path.display()
                 );
-
-                let mut index = 0;
-                for path in failed_paths.clone().iter() {
-                    index += 1;
-                    let res = watcher.watch(path, RecursiveMode::NonRecursive);
-                    match res {
-                        Ok(_) => {
-                            println!("Adding new source: {}", path);
-                            succeeded_paths.push(path);
-                            failed_paths.remove(index);
-                        }
-                        Err(_) => {
-                            println!("Unable to find file: {}", path);
-                        }
-                    }
-                }
-
-                // for path in succeeded_paths.clone().iter() {
-                //     Check if path is still available
-                //     let res = watcher
-                //         .watch(path, RecursiveMode::NonRecursive);
-                //     match res {
-                //         Ok(_) => {
-                //             println!("Adding new source: {}", path);
-                //             succeeded_paths.push(path);
-                //         }
-                //         Err(_) => {
-                //             println!("Unable to find file: {}", path);
-                //             failed_paths.push(path);
-                //         }
-                //     }
-                // }
 
                 let mut old_ports = Vec::new();
                 for port in SETTINGS.read().unwrap().settings().ports {
@@ -196,14 +176,15 @@ fn main() {
                     }
                 }
                 let mut test = (*SETTINGS.read().unwrap()).clone();
-                let refresh_result = test.refresh().expect("Unable to refresh").parse_settings();
+                let refresh_result = test.refresh().expect("Unable to refresh").parse_settings(path.to_str().unwrap().to_string());
                 if refresh_result.is_some() {
                     println!(
-                        "Error: {}. Reverting back to last working settings.",
+                        " * Error: {}. Reverting back to last working settings.",
                         refresh_result.unwrap()
                     );
                 } else {
-                    let _ = SETTINGS.write().unwrap().refresh();
+                    let _ = SETTINGS.write().unwrap().add_source(path.to_str().unwrap().to_string());
+                    println!(" * Successfully refreshed configuration.")
                 }
 
                 let mut new_ports = Vec::new();
@@ -225,6 +206,7 @@ fn main() {
                 // Find port listeners that are no longer in the configuration
                 for port in old_ports.clone() {
                     if !new_ports.contains(&port) {
+                        // TODO Add NFqueue "ports"
                         // println!("RM: {:#?}", port);
                         // let mut nfqueue = false;
                         // if port.nfqueue.is_some() {
@@ -252,10 +234,47 @@ fn main() {
                     }
                 }
 
-                show();
+                // Use the new settings
+                if SETTINGS.read().unwrap().settings().print_config {
+                    show();
+                }
             }
 
-            Err(e) => println!("watch error: {:?}", e),
+            Err(_err) => {
+                let mut index = 0;
+                for path in failed_paths.clone().iter() {
+                    let res = watcher.watch(path, RecursiveMode::NonRecursive);
+                    match res {
+                        Ok(_) => {
+                            println!("Adding new source: {}", path);
+                            succeeded_paths.push(path);
+                            failed_paths.remove(index);
+                        }
+                        Err(_) => {
+                            // println!("Unable to find file: {}", path);
+                        }
+                    }
+                    index += 1;
+                }
+
+                // for path in succeeded_paths.clone().iter() {
+                //     // Check if path is still available
+                //     let res = watcher
+                //         .watch(path, RecursiveMode::NonRecursive);
+                //     match res {
+                //         Ok(_) => {
+                //             println!("Adding new source: {}", path);
+                //             succeeded_paths.push(path);
+                //         }
+                //         Err(_) => {
+                //             println!("Unable to find file: {}", path);
+                //             failed_paths.push(path);
+                //         }
+                //     }
+                // }
+
+                thread::sleep(Duration::from_secs(1));
+            },
 
             _ => {
                 // Ignore event

@@ -1,4 +1,4 @@
-use config::{Config, ConfigError, Value};
+use config::{Config, ConfigError, Value, File};
 use crossbeam_channel::{Receiver, Sender};
 use ipnet::IpNet;
 use listeners::{nfq_callback, parse_ascii};
@@ -13,12 +13,13 @@ use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
 use uuid::Uuid;
 
-pub(crate) trait ShowSettings {
+pub(crate) trait AppSettings {
     fn settings(&self) -> AppConfig;
-    fn parse_settings(&self) -> Option<ConfigError>;
+    fn parse_settings(&self, new_source: String) -> Option<ConfigError>;
+    fn add_source(&mut self, new_source: String);
 }
 
-impl ShowSettings for Config {
+impl AppSettings for Config {
     fn settings<'e>(&self) -> AppConfig {
         let config = self
             .clone()
@@ -27,9 +28,14 @@ impl ShowSettings for Config {
         return config;
     }
 
-    fn parse_settings<'e>(&self) -> Option<ConfigError> {
-        let config = self.clone().try_into::<'e, AppConfig>().err();
+    fn parse_settings<'e>(&self, new_source: String) -> Option<ConfigError> {
+        let config = self.clone().merge(File::with_name(&new_source)).err();
+        // let config = self.clone().try_into::<'e, AppConfig>().err();
         return config;
+    }
+
+    fn add_source<'e>(&mut self, new_source: String) {
+        let _ = self.merge(File::with_name(&new_source)).unwrap();
     }
 }
 
