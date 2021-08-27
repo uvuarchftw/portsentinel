@@ -87,7 +87,6 @@ fn handle_tcp_packet(id: u32, source: IpAddr, destination: IpAddr, packet: &[u8]
 }
 
 pub fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
-
     // assume IPv4
     let header = Ipv4Packet::new(msg.get_payload());
     match header {

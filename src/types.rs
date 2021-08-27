@@ -1,4 +1,4 @@
-use config::{Config, ConfigError, Value, File};
+use config::{Config, ConfigError, File, Value};
 use crossbeam_channel::{Receiver, Sender};
 use ipnet::IpNet;
 use listeners::{nfq_callback, parse_ascii};
@@ -140,6 +140,7 @@ impl fmt::Display for TransportType {
     }
 }
 
+#[derive(Clone)]
 pub enum LogMsgType {
     Plaintext,
     Hex,
@@ -154,6 +155,7 @@ impl fmt::Display for LogMsgType {
     }
 }
 
+#[derive(Clone)]
 pub enum LogEntry {
     LogEntryStart {
         uuid: uuid::adapter::Hyphenated,
@@ -269,7 +271,7 @@ pub struct Listener {
     nfqueue: Option<u16>,
     bind_ip: IpNet,
     io_timeout: Duration,
-    settings: AppConfig,
+    captured_text_newline_separator: String,
     logchan: Sender<LogEntry>,
     die_rx: Receiver<bool>,
     die_tx: Sender<bool>,
@@ -283,6 +285,7 @@ impl Listener {
         logchan: Sender<LogEntry>,
     ) -> Listener {
         let (die_tx, die_rx) = crossbeam_channel::unbounded();
+
         let mut new_port_listener = Listener {
             port_spec: port_spec.clone(),
             port_type: port_spec.port_type,
@@ -292,7 +295,7 @@ impl Listener {
             nfqueue: port_spec.nfqueue,
             bind_ip: port_spec.bind_ip,
             io_timeout: port_spec.io_timeout,
-            settings,
+            captured_text_newline_separator: settings.captured_text_newline_separator,
             logchan,
             die_rx,
             die_tx,
@@ -310,6 +313,7 @@ impl Listener {
 
     /// Bind to NFQueue for port traffic
     fn bind_nfqueue(&mut self) {
+        // TODO Work on NFQueue listeners
         let mut q = nfqueue::Queue::new(State::new());
         q.open();
 
@@ -356,8 +360,7 @@ impl Listener {
     }
 
     fn log_packets(&self, packets: &[u8], con_uuid: uuid::adapter::Hyphenated) {
-        let ascii_text: String =
-            parse_ascii(packets, &self.settings.captured_text_newline_separator);
+        let ascii_text: String = parse_ascii(packets, &self.captured_text_newline_separator);
         let mut hex_text: String = "".to_string();
         let data = hex::encode(packets.clone().to_vec());
         for line in data.lines() {
@@ -501,6 +504,7 @@ impl PortListener {
 
                                 let local_self = listener_self.clone();
                                 thread::spawn(move || {
+                                    // Create separate thread to follow TCP stream and allow for new ones to connect
                                     let banner =
                                         local_self.banner.clone().unwrap_or("".to_string());
                                     // Write banner
@@ -527,14 +531,6 @@ impl PortListener {
                                             }
                                         }
                                     }
-
-                                    let print_disconnect =
-                                        local_self.settings.screen_config.print_disconnect;
-                                    let log_disconnect = local_self
-                                        .settings
-                                        .file_logging_config
-                                        .log_disconnect
-                                        || local_self.settings.teams_logging_config.log_disconnect;
 
                                     loop {
                                         // Kill thread if live configuration changes
@@ -563,21 +559,23 @@ impl PortListener {
                                                     //     );
                                                     // }
 
-                                                    if log_disconnect
-                                                        && local_self
-                                                            .logchan
-                                                            .send(LogEntry::LogEntryFinish {
-                                                                uuid: con_uuid,
-                                                                duration,
-                                                            })
-                                                            .is_err()
+                                                    if local_self
+                                                        .logchan
+                                                        .send(LogEntry::LogEntryFinish {
+                                                            uuid: con_uuid,
+                                                            duration,
+                                                        })
+                                                        .is_err()
                                                     {
                                                         println!("Failed to write LogEntry to logging thread");
                                                     }
                                                     break;
                                                 }
 
-                                                local_self.log_packets(&buf[0..tcp_stream_length], con_uuid);
+                                                local_self.log_packets(
+                                                    &buf[0..tcp_stream_length],
+                                                    con_uuid,
+                                                );
                                             }
                                             Err(_) => {
                                                 // if e.kind() == io::ErrorKind::WouldBlock {
@@ -634,7 +632,11 @@ impl PortListener {
                 listener_self.port_num
             );
 
-            match listener_self.socket.as_ref().expect("UDP Socket unavailable") {
+            match listener_self
+                .socket
+                .as_ref()
+                .expect("UDP Socket unavailable")
+            {
                 Sockets::Tcp(_) => {}
                 Sockets::Udp(socket) => {
                     let banner = listener_self.banner.clone().unwrap_or("".to_string());

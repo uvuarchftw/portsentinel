@@ -24,7 +24,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
-use crossbeam_channel::{unbounded};
+use crossbeam_channel::unbounded;
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
@@ -101,10 +101,10 @@ fn main() {
     // Logging thread
     thread::spawn(move || {
         let client = Client::new();
-        let settings = SETTINGS.read().unwrap().settings();
         loop {
             let conn: LogEntry = log_rx.recv().unwrap();
-            let msg = parse_msg(conn);
+            let settings = SETTINGS.read().unwrap().settings();
+            let msg = parse_msg(conn.clone());
 
             if settings.screen_logging {
                 println!("{}", msg);
@@ -115,15 +115,71 @@ fn main() {
                     .create(true)
                     .open(settings.file_logging_config.log_filepath.clone())
                     .expect("Failed to open local log file for writing");
-                writeln!(file, "{}", msg).unwrap();
+                match conn.clone() {
+                    LogEntry::LogEntryStart { .. } => {
+                        writeln!(file, "{}", msg).unwrap();
+                    }
+                    LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                        LogMsgType::Plaintext => {
+                            if settings.file_logging_config.log_ascii {
+                                writeln!(file, "{}", msg).unwrap();
+                            }
+                        }
+                        LogMsgType::Hex => {
+                            if settings.file_logging_config.log_hex {
+                                writeln!(file, "{}", msg).unwrap();
+                            }
+                        }
+                    },
+                    LogEntry::LogEntryFinish { .. } => {
+                        if settings.file_logging_config.log_disconnect {
+                            writeln!(file, "{}", msg).unwrap();
+                        }
+                    }
+                }
             }
+
+            // TODO Fix Teams logging output
             if settings.teams_logging {
                 let json_msg = Message::new().text(msg);
-                let _resp = client
-                    .post(&settings.teams_logging_config.channel_url)
-                    .json(&json_msg)
-                    .send()
-                    .unwrap();
+                match conn {
+                    LogEntry::LogEntryStart { .. } => {
+                        let _resp = client
+                            .post(&settings.teams_logging_config.channel_url)
+                            .json(&json_msg)
+                            .send()
+                            .unwrap();
+                    }
+                    LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                        LogMsgType::Plaintext => {
+                            if settings.teams_logging_config.log_ascii {
+                                let _resp = client
+                                    .post(&settings.teams_logging_config.channel_url)
+                                    .json(&json_msg)
+                                    .send()
+                                    .unwrap();
+                            }
+                        }
+                        LogMsgType::Hex => {
+                            if settings.teams_logging_config.log_hex {
+                                let _resp = client
+                                    .post(&settings.teams_logging_config.channel_url)
+                                    .json(&json_msg)
+                                    .send()
+                                    .unwrap();
+                            }
+                        }
+                    },
+                    LogEntry::LogEntryFinish { .. } => {
+                        if settings.teams_logging_config.log_disconnect {
+                            let _resp = client
+                                .post(&settings.teams_logging_config.channel_url)
+                                .json(&json_msg)
+                                .send()
+                                .unwrap();
+                        }
+                    }
+                }
             }
         }
     });
@@ -150,8 +206,6 @@ fn main() {
         }
     }
 
-
-
     loop {
         match rx.try_recv() {
             Ok(DebouncedEvent::Write(path)) => {
@@ -176,14 +230,20 @@ fn main() {
                     }
                 }
                 let mut test = (*SETTINGS.read().unwrap()).clone();
-                let refresh_result = test.refresh().expect("Unable to refresh").parse_settings(path.to_str().unwrap().to_string());
+                let refresh_result = test
+                    .refresh()
+                    .expect("Unable to refresh")
+                    .parse_settings(path.to_str().unwrap().to_string());
                 if refresh_result.is_some() {
                     println!(
                         " * Error: {}. Reverting back to last working settings.",
                         refresh_result.unwrap()
                     );
                 } else {
-                    let _ = SETTINGS.write().unwrap().add_source(path.to_str().unwrap().to_string());
+                    let _ = SETTINGS
+                        .write()
+                        .unwrap()
+                        .add_source(path.to_str().unwrap().to_string());
                     println!(" * Successfully refreshed configuration.")
                 }
 
@@ -250,31 +310,12 @@ fn main() {
                             succeeded_paths.push(path);
                             failed_paths.remove(index);
                         }
-                        Err(_) => {
-                            // println!("Unable to find file: {}", path);
-                        }
+                        Err(_) => {}
                     }
                     index += 1;
                 }
-
-                // for path in succeeded_paths.clone().iter() {
-                //     // Check if path is still available
-                //     let res = watcher
-                //         .watch(path, RecursiveMode::NonRecursive);
-                //     match res {
-                //         Ok(_) => {
-                //             println!("Adding new source: {}", path);
-                //             succeeded_paths.push(path);
-                //         }
-                //         Err(_) => {
-                //             println!("Unable to find file: {}", path);
-                //             failed_paths.push(path);
-                //         }
-                //     }
-                // }
-
                 thread::sleep(Duration::from_secs(1));
-            },
+            }
 
             _ => {
                 // Ignore event
@@ -317,7 +358,7 @@ fn parse_msg(conn: LogEntry) -> String {
                 formatted_time, uuid, duration
             )
         }
-    }
+    };
 }
 
 fn show() {
