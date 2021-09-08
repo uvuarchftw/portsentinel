@@ -236,12 +236,21 @@ fn main() {
                 let refresh_result = test
                     .refresh()
                     .expect("Unable to refresh")
-                    .parse_settings(path.to_str().unwrap().to_string());
-                if refresh_result.is_some() {
-                    println!(
-                        " * Error: {}. Reverting back to last working settings.",
-                        refresh_result.unwrap()
-                    );
+                    .check_source(path.to_str().unwrap().to_string());
+                let parse_result = test.refresh().expect("Unable to parse").parse_settings();
+                if refresh_result.is_some() || parse_result.is_some() {
+                    if refresh_result.is_some() {
+                        println!(
+                            " * Error: {}. Reverting back to last working settings.",
+                            refresh_result.unwrap()
+                        );
+                    }
+                    else if parse_result.is_some() {
+                        println!(
+                            " * Error: {}. Reverting back to last working settings.",
+                            parse_result.unwrap()
+                        );
+                    }
                 } else {
                     let _ = SETTINGS
                         .write()

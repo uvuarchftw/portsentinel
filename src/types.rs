@@ -29,9 +29,30 @@ impl AppSettings for Config {
         return config;
     }
 
-    fn parse_settings<'e>(&self, new_source: String) -> Option<ConfigError> {
-        let config = self.clone().merge(File::with_name(&new_source)).err();
-        // let config = self.clone().try_into::<'e, AppConfig>().err();
+    fn parse_settings<'e>(&self) -> Option<ConfigError> {
+        return match self.clone().try_into::<'e, AppConfig>() {
+            Ok(_) => {
+                // Configuration is valid
+                return None;
+            }
+            Err(err) => {
+                Some(err)
+            }
+        }
+    }
+
+    fn check_source<'e>(&self, new_source: String) -> Option<ConfigError> {
+        let config = match self.clone().merge(File::with_name(&new_source)) {
+            Ok(test) => {
+                // println!("{:#?}", test);
+                // Also check if parsing the configuration into AppSettings type will work too
+
+                return None;
+            }
+            Err(err) => {
+                Some(err)
+            }
+        };
         return config;
     }
 
