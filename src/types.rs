@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 pub(crate) trait AppSettings {
     fn settings(&self) -> AppConfig;
-    fn parse_settings(&self, new_source: String) -> Option<ConfigError>;
+    fn parse_settings(&self) -> Option<ConfigError>;
+    fn check_source(&self, new_source: String) -> Option<ConfigError>;
     fn add_source(&mut self, new_source: String);
 }
 
@@ -261,20 +262,28 @@ pub struct PortSpec {
     pub(crate) io_timeout: Duration,
 }
 
+pub enum UpdateType {
+    Die,
+    BlacklistHosts(Vec<IpNet>),
+    IOTimeout(Duration),
+    NewlineSeparator(String),
+}
+
 #[derive(Debug)]
 pub struct Listener {
     port_spec: PortSpec,
     port_type: TransportType,
     port_num: u16,
+    blacklist_hosts: Mutex<Vec<IpNet>>,
     banner: Option<String>,
     socket: Option<Sockets>,
     nfqueue: Option<u16>,
     bind_ip: IpNet,
-    io_timeout: Duration,
-    captured_text_newline_separator: String,
+    io_timeout: Mutex<Duration>,
+    captured_text_newline_separator: Mutex<String>,
     logchan: Sender<LogEntry>,
-    die_rx: Receiver<bool>,
-    die_tx: Sender<bool>,
+    update_rx: Receiver<UpdateType>,
+    update_tx: Sender<UpdateType>,
 }
 
 impl Listener {
@@ -284,21 +293,22 @@ impl Listener {
         settings: AppConfig,
         logchan: Sender<LogEntry>,
     ) -> Listener {
-        let (die_tx, die_rx) = crossbeam_channel::unbounded();
+        let (update_tx, update_rx) = crossbeam_channel::unbounded();
 
         let mut new_port_listener = Listener {
             port_spec: port_spec.clone(),
             port_type: port_spec.port_type,
             port_num: port_spec.port_range.into_inner().0,
+            blacklist_hosts: Mutex::new(settings.blacklist_hosts),
             banner: port_spec.banner,
             socket: None,
             nfqueue: port_spec.nfqueue,
             bind_ip: port_spec.bind_ip,
-            io_timeout: port_spec.io_timeout,
-            captured_text_newline_separator: settings.captured_text_newline_separator,
+            io_timeout: Mutex::new(port_spec.io_timeout),
+            captured_text_newline_separator: Mutex::new(settings.captured_text_newline_separator),
             logchan,
-            die_rx,
-            die_tx,
+            update_rx,
+            update_tx,
         };
 
         if new_port_listener.nfqueue.is_some() {
@@ -360,7 +370,7 @@ impl Listener {
     }
 
     fn log_packets(&self, packets: &[u8], con_uuid: uuid::adapter::Hyphenated) {
-        let ascii_text: String = parse_ascii(packets, &self.captured_text_newline_separator);
+        let ascii_text: String = parse_ascii(packets, &self.captured_text_newline_separator.lock().unwrap());
         let mut hex_text: String = "".to_string();
         let data = hex::encode(packets.clone().to_vec());
         for line in data.lines() {
@@ -434,7 +444,11 @@ impl PortListener {
     }
 
     pub(crate) fn kill(&self) {
-        let _ = self.inner.die_tx.send(true);
+        let _ = self.inner.update_tx.send(UpdateType::Die);
+    }
+
+    pub(crate) fn update(&self, update: UpdateType) {
+        let _ = self.inner.update_tx.send(update);
     }
 
     fn tcp_listener(&self) {
@@ -452,13 +466,31 @@ impl PortListener {
                                 listener_self.port_num
                             );
                             for res in socket.incoming() {
+                                let listener_self = listener_self.clone();
                                 let mut stream = match res {
                                     Ok(stream) => stream,
                                     Err(_) => {
                                         // Kill thread if live configuration changes
-                                        match listener_self.die_rx.try_recv() {
-                                            Ok(_) => {
-                                                break;
+                                        match listener_self.update_rx.try_recv() {
+                                            Ok(update) => {
+                                                match update {
+                                                    UpdateType::Die => {
+                                                        break;
+                                                    }
+                                                    UpdateType::BlacklistHosts(hosts) => {
+                                                        let blacklist_hosts = &mut *listener_self.blacklist_hosts.lock().unwrap();
+                                                        blacklist_hosts.clear();
+                                                        for host in hosts {
+                                                            blacklist_hosts.push(host);
+                                                        }
+                                                    }
+                                                    UpdateType::IOTimeout(timeout) => {
+                                                        *listener_self.io_timeout.lock().unwrap() = timeout;
+                                                    }
+                                                    UpdateType::NewlineSeparator(separator) => {
+                                                        *listener_self.captured_text_newline_separator.lock().unwrap() = separator;
+                                                    }
+                                                }
                                             }
                                             Err(_) => {}
                                         }
@@ -467,10 +499,10 @@ impl PortListener {
                                     }
                                 };
                                 stream
-                                    .set_read_timeout(Some(listener_self.io_timeout))
+                                    .set_read_timeout(Some(*listener_self.io_timeout.lock().unwrap()))
                                     .expect("Failed to set read timeout on TcpStream");
                                 stream
-                                    .set_write_timeout(Some(listener_self.io_timeout))
+                                    .set_write_timeout(Some(*listener_self.io_timeout.lock().unwrap()))
                                     .expect("Failed to set write timeout on TcpStream");
                                 let local = stream.local_addr().unwrap();
                                 let peer = match stream.peer_addr() {
@@ -485,7 +517,18 @@ impl PortListener {
                                     }
                                 };
 
-                                // println!("{:>5} + TCP ACK from {}", local.port(), peer);
+                                let mut in_blacklist = false;
+                                for netmask in listener_self.blacklist_hosts.lock().unwrap().clone() {
+                                    if netmask.contains(&peer.ip()) {
+                                        in_blacklist = true;
+                                        break;
+                                    }
+                                }
+                                if in_blacklist {
+                                    // Skip this connection since it is a blacklisted IP
+                                    continue;
+                                }
+
                                 let con_uuid = Uuid::new_v4().to_hyphenated();
                                 if listener_self
                                     .logchan
@@ -534,9 +577,23 @@ impl PortListener {
 
                                     loop {
                                         // Kill thread if live configuration changes
-                                        match local_self.die_rx.try_recv() {
-                                            Ok(_) => {
-                                                break;
+                                        match local_self.update_rx.try_recv() {
+                                            Ok(update) => {
+                                                match update {
+                                                    UpdateType::Die => {
+                                                        break;
+                                                    }
+                                                    UpdateType::BlacklistHosts(hosts) => {
+                                                        *listener_self.blacklist_hosts.lock().unwrap() = hosts;
+                                                        println!("Updated blacklisthosts2, from {}\n{:#?}", listener_self.port_num, *listener_self.blacklist_hosts.lock().unwrap());
+                                                    }
+                                                    UpdateType::IOTimeout(timeout) => {
+                                                        *listener_self.io_timeout.lock().unwrap() = timeout;
+                                                    }
+                                                    UpdateType::NewlineSeparator(separator) => {
+                                                        *listener_self.captured_text_newline_separator.lock().unwrap() = separator;
+                                                    }
+                                                }
                                             }
                                             Err(_) => {}
                                         }
@@ -549,15 +606,6 @@ impl PortListener {
                                                     let duration = start.elapsed().as_secs() as f32
                                                         + start.elapsed().subsec_millis() as f32
                                                             / 1000.0;
-                                                    // // use Duration::as_float_secs() here as soon as it stabilizes
-                                                    // if print_disconnect {
-                                                    //     println!(
-                                                    //         "{:>5} - TCP FIN from {} after {:.1}s",
-                                                    //         local.port(),
-                                                    //         peer,
-                                                    //         duration
-                                                    //     );
-                                                    // }
 
                                                     if local_self
                                                         .logchan
@@ -641,9 +689,23 @@ impl PortListener {
                 Sockets::Udp(socket) => {
                     let banner = listener_self.banner.clone().unwrap_or("".to_string());
                     loop {
-                        match listener_self.die_rx.try_recv() {
-                            Ok(_) => {
-                                break;
+                        match listener_self.update_rx.try_recv() {
+                            Ok(update) => {
+                                match update {
+                                    UpdateType::Die => {
+                                        break;
+                                    }
+                                    UpdateType::BlacklistHosts(hosts) => {
+                                        *listener_self.blacklist_hosts.lock().unwrap() = hosts;
+                                    }
+                                    UpdateType::IOTimeout(timeout) => {
+                                        *listener_self.io_timeout.lock().unwrap() = timeout;
+                                    }
+                                    UpdateType::NewlineSeparator(separator) => {
+                                        *listener_self.captured_text_newline_separator.lock().unwrap() = separator;
+                                    }
+                                }
+
                             }
                             Err(_) => {}
                         }

@@ -33,6 +33,8 @@ use config::*;
 use settings::load_defaults;
 use std::sync::mpsc::channel;
 use types::*;
+use ipnet::IpNet;
+use std::net::IpAddr;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const CFG_FILEPATHS: [&str; 4] = [
@@ -57,9 +59,9 @@ fn main() {
 
     //// Gather setting files
     // Create a channel to receive the write events to any configuration files
-    let (tx, rx) = channel();
+    let (watcher_tx, watcher_rx) = channel();
     // Automatically select the best implementation for the platform.
-    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2)).unwrap();
+    let mut watcher: RecommendedWatcher = Watcher::new(watcher_tx, Duration::from_secs(2)).unwrap();
 
     let mut failed_paths: Vec<&str> = Vec::new();
     let mut succeeded_paths: Vec<&str> = Vec::new();
@@ -72,7 +74,7 @@ fn main() {
             Ok(_) => {
                 println!("Using file: {}", path);
                 succeeded_paths.push(path);
-                let test = SETTINGS.read().unwrap().parse_settings(path.to_string());
+                let test = SETTINGS.read().unwrap().check_source(path.to_string());
                 match test {
                     None => {
                         // Add the new file to the global settings
@@ -140,11 +142,12 @@ fn main() {
             }
 
             // TODO Fix Teams logging output
+            // TODO Add ratelimiting logic (HTTP 429 error)
             if settings.teams_logging {
                 let json_msg = Message::new().text(msg);
                 match conn {
                     LogEntry::LogEntryStart { .. } => {
-                        let _resp = client
+                        let resp = client
                             .post(&settings.teams_logging_config.channel_url)
                             .json(&json_msg)
                             .send()
@@ -207,7 +210,7 @@ fn main() {
     }
 
     loop {
-        match rx.try_recv() {
+        match watcher_rx.try_recv() {
             Ok(DebouncedEvent::Write(path)) => {
                 println!(
                     " * {} written; refreshing configuration ...",
@@ -263,8 +266,8 @@ fn main() {
                     }
                 }
 
-                // Find port listeners that are no longer in the configuration
                 for port in old_ports.clone() {
+                    // Find port listeners that are no longer in the configuration
                     if !new_ports.contains(&port) {
                         // TODO Add NFqueue "ports"
                         // println!("RM: {:#?}", port);
@@ -276,8 +279,6 @@ fn main() {
                         // Now find the corresponding port listener and drop the value to stop listening
                         for (index, listener) in listeners.to_vec().iter().enumerate() {
                             if listener.get_port_spec().eq(&port) {
-                                // println!("PS: {:#?}", listener.get_port_spec());
-                                // println!("PS2: {:#?}", &port);
                                 listener.kill();
                                 listeners.remove(index);
                             }
@@ -285,11 +286,17 @@ fn main() {
                     }
                 }
 
+                // Update all of the global values of existing port listeners
+                for listener in listeners.to_vec().iter() {
+                    let settings = SETTINGS.read().unwrap().settings();
+                    listener.update(UpdateType::BlacklistHosts(settings.blacklist_hosts.clone()));
+                    listener.update(UpdateType::IOTimeout(settings.io_timeout));
+                    listener.update(UpdateType::NewlineSeparator(settings.captured_text_newline_separator.clone()));
+                }
+
                 // Find port listeners that need to be added
                 for port in new_ports.clone() {
                     if !old_ports.contains(&port) {
-                        // println!("NEW: {:#?}", port);
-                        thread::sleep(Duration::from_secs(1));
                         listeners.push(PortListener::new(port, settings.clone(), log_tx.clone()));
                     }
                 }
