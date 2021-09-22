@@ -5,7 +5,7 @@ extern crate hex;
 extern crate ipnet;
 extern crate libc;
 extern crate mhteams;
-extern crate nfqueue;
+extern crate nfq;
 extern crate notify;
 extern crate pnet;
 extern crate regex;
@@ -24,7 +24,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{unbounded, Receiver, Sender, RecvError};
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
@@ -98,91 +98,103 @@ fn main() {
     }
 
     // Logging channels
-    let (log_tx, log_rx) = unbounded();
+    let (log_tx, log_rx): (Sender<LogEntry>, Receiver<LogEntry>) = unbounded();
 
     // Logging thread
     thread::spawn(move || {
         let client = Client::new();
         loop {
-            let conn: LogEntry = log_rx.recv().unwrap();
-            let settings = SETTINGS.read().unwrap().settings();
-            let msg = parse_msg(conn.clone());
+            match log_rx.recv() {
+                Ok(conn) => {
+                    // Get current global settings
+                    let settings = SETTINGS.read().unwrap().settings();
 
-            if settings.screen_logging {
-                println!("{}", msg);
-            }
-            if settings.file_logging {
-                let mut file = OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(settings.file_logging_config.log_filepath.clone())
-                    .expect("Failed to open local log file for writing");
-                match conn.clone() {
-                    LogEntry::LogEntryStart { .. } => {
-                        writeln!(file, "{}", msg).unwrap();
+                    let msg = parse_msg(conn.clone());
+
+                    if settings.screen_logging {
+                        println!("{}", msg);
                     }
-                    LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
-                        LogMsgType::Plaintext => {
-                            if settings.file_logging_config.log_ascii {
+                    if settings.file_logging {
+                        let mut file = OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(settings.file_logging_config.log_filepath.clone())
+                            .expect("Failed to open local log file for writing");
+                        match conn.clone() {
+                            LogEntry::LogEntryNFQueue { .. } => {
                                 writeln!(file, "{}", msg).unwrap();
                             }
-                        }
-                        LogMsgType::Hex => {
-                            if settings.file_logging_config.log_hex {
+                            LogEntry::LogEntryStart { .. } => {
                                 writeln!(file, "{}", msg).unwrap();
                             }
-                        }
-                    },
-                    LogEntry::LogEntryFinish { .. } => {
-                        if settings.file_logging_config.log_disconnect {
-                            writeln!(file, "{}", msg).unwrap();
+                            LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                                LogMsgType::Plaintext => {
+                                    if settings.file_logging_config.log_ascii {
+                                        writeln!(file, "{}", msg).unwrap();
+                                    }
+                                }
+                                LogMsgType::Hex => {
+                                    if settings.file_logging_config.log_hex {
+                                        writeln!(file, "{}", msg).unwrap();
+                                    }
+                                }
+                            },
+                            LogEntry::LogEntryFinish { .. } => {
+                                if settings.file_logging_config.log_disconnect {
+                                    writeln!(file, "{}", msg).unwrap();
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            // TODO Fix Teams logging output
-            // TODO Add ratelimiting logic (HTTP 429 error)
-            if settings.teams_logging {
-                let json_msg = Message::new().text(msg);
-                match conn {
-                    LogEntry::LogEntryStart { .. } => {
-                        let resp = client
-                            .post(&settings.teams_logging_config.channel_url)
-                            .json(&json_msg)
-                            .send()
-                            .unwrap();
-                    }
-                    LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
-                        LogMsgType::Plaintext => {
-                            if settings.teams_logging_config.log_ascii {
-                                let _resp = client
+                    // TODO Fix Teams logging output
+                    // TODO Add ratelimiting logic (HTTP 429 error)
+                    if settings.teams_logging {
+                        let json_msg = Message::new().text(msg);
+                        match conn {
+                            LogEntry::LogEntryNFQueue { .. } => {
+
+                            }
+                            LogEntry::LogEntryStart { .. } => {
+                                let resp = client
                                     .post(&settings.teams_logging_config.channel_url)
                                     .json(&json_msg)
                                     .send()
                                     .unwrap();
                             }
-                        }
-                        LogMsgType::Hex => {
-                            if settings.teams_logging_config.log_hex {
-                                let _resp = client
-                                    .post(&settings.teams_logging_config.channel_url)
-                                    .json(&json_msg)
-                                    .send()
-                                    .unwrap();
+                            LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                                LogMsgType::Plaintext => {
+                                    if settings.teams_logging_config.log_ascii {
+                                        let _resp = client
+                                            .post(&settings.teams_logging_config.channel_url)
+                                            .json(&json_msg)
+                                            .send()
+                                            .unwrap();
+                                    }
+                                }
+                                LogMsgType::Hex => {
+                                    if settings.teams_logging_config.log_hex {
+                                        let _resp = client
+                                            .post(&settings.teams_logging_config.channel_url)
+                                            .json(&json_msg)
+                                            .send()
+                                            .unwrap();
+                                    }
+                                }
+                            },
+                            LogEntry::LogEntryFinish { .. } => {
+                                if settings.teams_logging_config.log_disconnect {
+                                    let _resp = client
+                                        .post(&settings.teams_logging_config.channel_url)
+                                        .json(&json_msg)
+                                        .send()
+                                        .unwrap();
+                                }
                             }
-                        }
-                    },
-                    LogEntry::LogEntryFinish { .. } => {
-                        if settings.teams_logging_config.log_disconnect {
-                            let _resp = client
-                                .post(&settings.teams_logging_config.channel_url)
-                                .json(&json_msg)
-                                .send()
-                                .unwrap();
                         }
                     }
                 }
+                Err(_) => {}
             }
         }
     });
@@ -279,7 +291,7 @@ fn main() {
                     // Find port listeners that are no longer in the configuration
                     if !new_ports.contains(&port) {
                         // TODO Add NFqueue "ports"
-                        // println!("RM: {:#?}", port);
+                        println!("RM: {:#?}", port);
                         // let mut nfqueue = false;
                         // if port.nfqueue.is_some() {
                         //     nfqueue = true;
@@ -288,7 +300,8 @@ fn main() {
                         // Now find the corresponding port listener and drop the value to stop listening
                         for (index, listener) in listeners.to_vec().iter().enumerate() {
                             if listener.get_port_spec().eq(&port) {
-                                listener.kill();
+                                listener.kill_listener();
+                                println!("Killed {:#?}", port);
                                 listeners.remove(index);
                             }
                         }
@@ -340,10 +353,92 @@ fn main() {
     }
 }
 
+pub(crate) fn log_entry_msg(logchan: Sender<LogEntry>, packets: &[u8], con_uuid: uuid::adapter::Hyphenated) {
+    let ascii_text: String = parse_ascii(packets);
+    let mut hex_text: String = "".to_string();
+    let data = hex::encode(packets.clone().to_vec());
+    for line in data.lines() {
+        hex_text += line;
+    }
+
+    if logchan
+        .send(LogEntry::LogEntryMsg {
+            uuid: con_uuid,
+            msg: ascii_text.parse().unwrap(),
+            msgtype: LogMsgType::Plaintext,
+            msglen: packets.len(),
+        })
+        .is_err()
+    {
+        println!("Failed to write LogEntry to logging thread");
+    }
+
+    if logchan
+        .send(LogEntry::LogEntryMsg {
+            uuid: con_uuid,
+            msg: hex_text,
+            msgtype: LogMsgType::Hex,
+            msglen: packets.len(),
+        })
+        .is_err()
+    {
+        println!("Failed to write LogEntry to logging thread");
+    }
+}
+
+pub(crate) fn log_nfqueue(logchan: Sender<LogEntry>, mac_addr: String, nfqueue_id: u16, transporttype: TransportType, remoteip: String, remoteport: u16, localip: String, localport: u16) {
+    if logchan
+        .send(LogEntry::LogEntryNFQueue {
+            nfqueue_id,
+            mac_addr,
+            transporttype,
+            remoteip,
+            remoteport,
+            localip,
+            localport
+        })
+        .is_err()
+    {
+        println!("Failed to write LogEntry to logging thread");
+    }
+}
+
+fn parse_ascii(packets: &[u8]) -> String {
+    let captured_text_newline_seperator = SETTINGS.read().unwrap().settings().captured_text_newline_separator;
+    let mut printable_text: Vec<u8> = Vec::new();
+    for i in 0..packets.len() {
+        // ASCII data, only allow newline or carriage return or US keyboard keys
+        if packets[i] > 31 && packets[i] < 127 {
+            printable_text.push(packets[i]);
+        } else if packets[i] == 10 || packets[i] == 13 {
+            for letter in captured_text_newline_seperator.as_bytes() {
+                printable_text.push(*letter);
+            }
+        }
+    }
+    let mut ascii_text: String = "".to_string();
+    let data = String::from_utf8_lossy(printable_text.as_slice());
+    for line in data.lines() {
+        ascii_text += &*line.replace("\r", "");
+    }
+    return ascii_text;
+}
+
 fn parse_msg(conn: LogEntry) -> String {
     let current_time = Local::now();
     let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
     return match conn {
+        LogEntry::LogEntryNFQueue {
+            mac_addr,
+            nfqueue_id,
+            transporttype,
+            localip,
+            localport,
+            remoteip,
+            remoteport,
+        } => {
+            format!("[{}]: NFQueue {} {} DEST_IP {}:{} SRC_IP {}:{} MAC_ADDR {}", formatted_time, nfqueue_id, transporttype, localip, localport, remoteip, remoteport, mac_addr)
+        },
         LogEntry::LogEntryStart {
             uuid,
             transporttype,
@@ -353,7 +448,7 @@ fn parse_msg(conn: LogEntry) -> String {
             remoteport,
         } => {
             format!(
-                "[{}]: Connection-ID: {} {} DEST_IP {}:{} SRC_IP {}:{} ",
+                "[{}]: Connection-ID: {} {} DEST_IP {}:{} SRC_IP {}:{}",
                 formatted_time, uuid, transporttype, localip, localport, remoteip, remoteport
             )
         }
@@ -384,6 +479,18 @@ fn show() {
 
 fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {
     let port_spec: PortSpec = match port {
+        PortType::IcmpNfqueue {
+            port_type,
+            nfqueue,
+            bind_ip
+        } => PortSpec {
+            port_type: port_type.clone(),
+            port_range: 0..=0,
+            banner: None,
+            bind_ip: bind_ip.clone(),
+            nfqueue: Some(*nfqueue),
+            io_timeout: settings.clone().io_timeout,
+        },
         PortType::SinglePortNfqueue {
             port_type,
             port_num,

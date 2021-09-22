@@ -3,6 +3,7 @@ name = "portsentinel"
 version = "0.1.0"
 authors = ["Dallen Bishop <dallen.bishop@uvu.edu>"]
 license = "MIT"
+edition = "2018"
 
 [dependencies]
 config = "^0.11"
@@ -12,7 +13,8 @@ serde = { version = "1.0", features = ["derive"] }
 ipnet = { version = "2.3.1", features = ["serde"] }
 regex = "1"
 chrono = "0.4"
-nfqueue = "0.9"
+tokio = { version = "1", features = ["full"] }
+nfq = { git = "https://github.com/uvuarchftw/nfq-rs" }
 libc = "0.2"
 pnet = "0.26"
 uuid = { version = "0.8.1", features = ["v4"] }
@@ -20,3 +22,4 @@ hex = "0.4.2"
 mhteams = "0.1.0"
 reqwest = { version = "0.10", features = ["blocking", "json"] }
 crossbeam-channel = "0.5"
+futures-util = "0.3.17"

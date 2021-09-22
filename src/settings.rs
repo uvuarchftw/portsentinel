@@ -1,5 +1,5 @@
 use config::{Config, File};
-use CFG_FILEPATHS;
+use crate::CFG_FILEPATHS;
 
 pub(crate) fn load_defaults() -> Config {
     let mut settings = config::Config::new();
@@ -23,14 +23,3 @@ pub(crate) fn load_defaults() -> Config {
         .expect("Cannot set default value for io_timeout setting");
     return settings;
 }
-
-//         match port["nfqueue"].as_i64() {
-//             Some(queue) => {
-//                 nfqueue = Some(queue as u16);
-//                 println!("  Receiving packets from nfqueue {}", queue);
-//                 println!("  Example iptables rule to make this work:");
-//                 println!(
-//                     "    iptables -A INPUT -p {} --dport {} -j NFQUEUE --queue-num {} --queue-bypass",
-//                     port_type.to_string().to_lowercase(), port_num.unwrap(), queue
-//                 );
-//             }

@@ -3,11 +3,17 @@ use std::net::IpAddr;
 use pnet::packet::icmp::{echo_reply, echo_request, IcmpPacket, IcmpTypes};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
 
-use types::*;
+use std::sync::Arc;
+use crate::types::*;
+use uuid::Uuid;
+use crossbeam_channel::Sender;
+use nfq::Verdict;
+use crate::log_nfqueue;
 
 fn handle_icmp_packet(id: u32, source: IpAddr, destination: IpAddr, packet: &[u8]) {
     let icmp_packet = IcmpPacket::new(packet);
@@ -86,106 +92,119 @@ fn handle_tcp_packet(id: u32, source: IpAddr, destination: IpAddr, packet: &[u8]
     }
 }
 
-pub fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
+pub fn nfq_ipv4_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
+    let mut unknown = false;
     // assume IPv4
-    let header = Ipv4Packet::new(msg.get_payload());
-    match header {
-        Some(h) => match h.get_next_level_protocol() {
-            IpNextHeaderProtocols::Icmp => handle_icmp_packet(
-                msg.get_id(),
-                IpAddr::V4(h.get_source()),
-                IpAddr::V4(h.get_destination()),
-                h.payload(),
-            ),
-            IpNextHeaderProtocols::Udp => handle_udp_packet(
-                msg.get_id(),
-                IpAddr::V4(h.get_source()),
-                IpAddr::V4(h.get_destination()),
-                h.payload(),
-            ),
-            IpNextHeaderProtocols::Tcp => handle_tcp_packet(
-                msg.get_id(),
-                IpAddr::V4(h.get_source()),
-                IpAddr::V4(h.get_destination()),
-                h.payload(),
-            ),
-            _ => println!(
-                "[{}]: Unknown {} packet: {} > {}; protocol: {:?} length: {}",
-                msg.get_id(),
-                match IpAddr::V4(h.get_source()) {
-                    IpAddr::V4(..) => "IPv4",
-                    _ => "IPv6",
-                },
-                IpAddr::V4(h.get_source()),
-                IpAddr::V4(h.get_destination()),
-                h.get_next_level_protocol(),
-                h.payload().len()
-            ),
-        },
-        None => println!("Malformed IPv4 packet"),
-    }
+    let ipv4_header = Ipv4Packet::new(msg.get_payload());
+    match ipv4_header {
+        Some(ipv4_header) => {
+            match ipv4_header.get_next_level_protocol() {
+                // IpNextHeaderProtocols::Icmp => handle_icmp_packet(
+                //     msg.get_id(),
+                //     IpAddr::V4(ipv4_header.get_source()),
+                //     IpAddr::V4(ipv4_header.get_destination()),
+                //     ipv4_header.payload(),
+                // ),
+                // IpNextHeaderProtocols::Udp => handle_udp_packet(
+                //     msg.get_id(),
+                //     IpAddr::V4(ipv4_header.get_source()),
+                //     IpAddr::V4(ipv4_header.get_destination()),
+                //     ipv4_header.payload(),
+                // ),
+                IpNextHeaderProtocols::Tcp => {
+                    let tcp = TcpPacket::new(ipv4_header.payload());
+                    match tcp {
+                        Some(tcp) => {
+                            let mac_array = msg.get_hw_addr();
+                            let mac_addr = match mac_array {
+                                None => {
+                                    format!("MAC_GET_ERROR")
+                                }
+                                Some(mac_array) => {
+                                    format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac_array[0], mac_array[1], mac_array[2], mac_array[3], mac_array[4], mac_array[5])
+                                }
+                            };
+                            log_nfqueue(
+                                logchan,
+                                mac_addr,
+                                msg.get_queue_num(),
+                                TransportType::tcp,
+                                ipv4_header.get_source().to_string(),
+                                tcp.get_source(),
+                                ipv4_header.get_destination().to_string(),
+                                tcp.get_destination(),
+                            );
+                        }
+                        None => {}
+                    }
 
-    state.count += 1;
-    println!("count: {}", state.count);
-
-    msg.set_verdict(nfqueue::Verdict::Accept);
-    // let header = Ipv4Packet::new(msg.get_payload());
-    // match header {
-    //     Some(h) => match h.get_next_level_protocol() {
-    //         IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
-    //             Some(p) => {
-    //                 let remoteip = IpAddr::V4(h.get_source());
-    //                 if !state.ports.contains(&p.get_destination()) {
-    //                     println!(
-    //                         "{:>5} = TCP SYN from {}:{} (unmonitored)",
-    //                         p.get_destination(),
-    //                         remoteip,
-    //                         p.get_source()
-    //                     );
-    //                 } else {
-    //                     println!(
-    //                         "{:>5} = TCP SYN from {}:{}",
-    //                         p.get_destination(),
-    //                         remoteip,
-    //                         p.get_source()
-    //                     );
-    //                 }
-    //                 let con_uuid = Uuid::new_v4().to_hyphenated();
-    //                 let _ = state.logchan.send(LogEntry::LogEntryStart {
-    //                     uuid: con_uuid,
-    //                     transporttype: TransportType::Tcp,
-    //                     remoteip: remoteip.to_string(),
-    //                     remoteport: p.get_source(),
-    //                     localip: "".to_string(),
-    //                     localport: p.get_destination(),
-    //                 });
-    //             }
-    //             None => println!("Received malformed TCP packet"),
-    //         },
-    //         _ => println!("Received a non-TCP packet"),
-    //     },
-    //     None => println!("Received malformed IPv4 packet"),
-    // }
-    //
-    // msg.set_verdict(nfqueue::Verdict::Accept);
-}
-
-pub(crate) fn parse_ascii(packets: &[u8], captured_text_newline_seperator: &str) -> String {
-    let mut printable_text: Vec<u8> = Vec::new();
-    for i in 0..packets.len() {
-        // ASCII data, only allow newline or carriage return or US keyboard keys
-        if packets[i] > 31 && packets[i] < 127 {
-            printable_text.push(packets[i]);
-        } else if packets[i] == 10 || packets[i] == 13 {
-            for letter in captured_text_newline_seperator.as_bytes() {
-                printable_text.push(*letter);
+                    // let tcp = TcpPacket::new(ipv4_header.payload());
+                    // if let Some(tcp) = tcp {
+                    //     println!(
+                    //         "TCP Packet: {}:{} > {}:{}; length: {}",
+                    //         ipv4_header.get_source(),
+                    //         tcp.get_source(),
+                    //         ipv4_header.get_destination(),
+                    //         tcp.get_destination(),
+                    //         ipv4_header.payload().len(),
+                    //         // msg.get_hw_addr().unwrap()
+                    //     );
+                    //     println!("tcp payload: {:?}", tcp.payload());
+                    // } else {
+                    //     println!("Malformed TCP Packet");
+                    // }
+                }
+                //     handle_tcp_packet(
+                //     msg.get_id(),
+                //     IpAddr::V4(ipv4_header.get_source()),
+                //     IpAddr::V4(ipv4_header.get_destination()),
+                //     ipv4_header.payload(),
+                // ),
+                _ => {
+                    unknown = true;
+                }
             }
         }
+        None => {
+            unknown = true;
+        }
     }
-    let mut ascii_text: String = "".to_string();
-    let data = String::from_utf8_lossy(printable_text.as_slice());
-    for line in data.lines() {
-        ascii_text += &*line.replace("\r", "");
-    }
-    return ascii_text;
+
+    msg.set_verdict(Verdict::Drop);
+}
+
+pub fn nfq_ipv6_callback(msg: nfq::Message) {
+    // let mut unknown = false;
+    // // Try IPv6
+    // let ipv6_header = Ipv6Packet::new(msg.get_payload());
+    // match ipv6_header {
+    //     Some(ipv6_header) => match ipv6_header.get_next_header() {
+    //         IpNextHeaderProtocols::Icmpv6 => handle_icmp_packet(
+    //             msg.get_id(),
+    //             IpAddr::V6(ipv6_header.get_source()),
+    //             IpAddr::V6(ipv6_header.get_destination()),
+    //             ipv6_header.payload(),
+    //         ),
+    //         IpNextHeaderProtocols::Udp => handle_udp_packet(
+    //             msg.get_id(),
+    //             IpAddr::V6(ipv6_header.get_source()),
+    //             IpAddr::V6(ipv6_header.get_destination()),
+    //             ipv6_header.payload(),
+    //         ),
+    //         IpNextHeaderProtocols::Tcp => handle_tcp_packet(
+    //             msg.get_id(),
+    //             IpAddr::V6(ipv6_header.get_source()),
+    //             IpAddr::V6(ipv6_header.get_destination()),
+    //             ipv6_header.payload(),
+    //         ),
+    //         _ => {
+    //             unknown = true;
+    //         }
+    //     },
+    //     None => {
+    //         unknown = true;
+    //     }
+    // }
+    //
+    // msg.set_verdict(nfqueue::Verdict::Drop);
 }
