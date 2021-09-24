@@ -1,31 +1,31 @@
-use config::{Config, ConfigError, File, Value};
-use crossbeam_channel::{Receiver, Sender, unbounded};
-use ipnet::IpNet;
 use crate::listeners::{nfq_ipv4_callback, nfq_ipv6_callback};
+use crate::{log_entry_msg, log_nfqueue};
+use config::{Config, ConfigError, File, Value};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use futures_util::future::FutureExt;
+use futures_util::Future;
+use ipnet::IpNet;
+use nfq::{Message, Queue, Verdict};
+use pnet::packet::icmp::IcmpPacket;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::udp::UdpPacket;
+use pnet::packet::Packet;
+use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+use std::error::Error as std_err;
 use std::io::{Read, Write};
 use std::net::{TcpListener, UdpSocket};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{fmt, io, thread};
-use uuid::Uuid;
-use crate::{log_entry_msg, log_nfqueue};
-use nfq::{Queue, Verdict, Message};
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::ipv6::Ipv6Packet;
-use pnet::packet::tcp::TcpPacket;
-use pnet::packet::udp::UdpPacket;
-use pnet::packet::icmp::IcmpPacket;
-use pnet::packet::Packet;
-use tokio::time::timeout;
-use std::error::Error as std_err;
-use serde::de::Error;
 use tokio::sync::oneshot;
-use futures_util::future::FutureExt;
-use futures_util::Future;
+use tokio::time::timeout;
+use uuid::Uuid;
 
 pub(crate) trait AppSettings {
     fn settings(&self) -> AppConfig;
@@ -418,7 +418,10 @@ impl PortListener {
                     pl.udp_listener();
                 }
                 TransportType::icmp => {
-                    println!("ICMP Listener Unsupported. Can only receive ICMP from NFQueue {:#?}", port_spec)
+                    println!(
+                        "ICMP Listener Unsupported. Can only receive ICMP from NFQueue {:#?}",
+                        port_spec
+                    )
                 }
             },
             Some(queue_num) => {
@@ -433,16 +436,16 @@ impl PortListener {
                 }
                 match port_spec.port_type {
                     TransportType::icmp => {
-                        println!("Receiving packets from nfqueue {}", queue_num);
-                        println!("Example iptables rule to make this work:");
+                        println!("  Receiving packets from nfqueue {}", queue_num);
+                        println!("  Example iptables rule to make this work:");
                         println!(
                             "    iptables -A INPUT -p ICMP -j NFQUEUE --queue-num {} --queue-bypass",
                             queue_num
                         );
                     }
                     _ => {
-                        println!("Receiving packets from nfqueue {}", queue_num);
-                        println!("Example iptables rule to make this work:");
+                        println!("  Receiving packets from nfqueue {}", queue_num);
+                        println!("  Example iptables rule to make this work:");
                         println!(
                             "    iptables -A INPUT -p {} --dport {} -j NFQUEUE --queue-num {} --queue-bypass",
                             pl.inner.port_type.to_string(), pl.inner.port_num, queue_num
@@ -768,7 +771,11 @@ impl PortListener {
                                     println!("Failed to write LogEntry to logging thread");
                                 }
 
-                                log_entry_msg(listener_self.logchan.clone(), &buf[0..number_of_bytes], con_uuid);
+                                log_entry_msg(
+                                    listener_self.logchan.clone(),
+                                    &buf[0..number_of_bytes],
+                                    con_uuid,
+                                );
                             }
                             Err(_err) => {
                                 thread::sleep(Duration::from_millis(50));
@@ -784,9 +791,15 @@ impl PortListener {
     fn bind_nfqueue(&self, ipv4: bool) {
         let listener_self = self.inner.clone();
         thread::spawn(move || {
-            let mut queue = Arc::new(Mutex::new(Queue::open().expect("Unable to open NETLINK queue.")));
+            let mut queue = Arc::new(Mutex::new(
+                Queue::open().expect("Unable to open NETLINK queue."),
+            ));
             let nfqueue_num = listener_self.nfqueue.unwrap();
-            queue.lock().unwrap().bind(nfqueue_num).expect(format!("Unable to bind to NFQueue {}", nfqueue_num).as_str());
+            queue
+                .lock()
+                .unwrap()
+                .bind(nfqueue_num)
+                .expect(format!("Unable to bind to NFQueue {}", nfqueue_num).as_str());
             println!("Bound to NFQueue {}", nfqueue_num);
             loop {
                 match listener_self.update_rx.try_recv() {
@@ -804,8 +817,7 @@ impl PortListener {
                 let msg = queue.lock().unwrap().recv().unwrap();
                 if ipv4 {
                     nfq_ipv4_callback(msg, listener_self.logchan.clone());
-                }
-                else {
+                } else {
                     nfq_ipv6_callback(msg, listener_self.logchan.clone());
                 }
             }
@@ -832,15 +844,19 @@ pub struct NFQueueState {
 }
 
 impl NFQueueState {
-    pub fn new(
-        listener: Arc<Listener>
-    ) -> NFQueueState {
+    pub fn new(listener: Arc<Listener>) -> NFQueueState {
         NFQueueState {
             port_type: listener.port_type.clone(),
             port_num: listener.port_num.clone(),
             blacklist_hosts: Mutex::new(listener.blacklist_hosts.lock().unwrap().clone()),
             bind_ip: listener.bind_ip,
-            captured_text_newline_separator: Mutex::new(listener.captured_text_newline_separator.lock().unwrap().clone()),
+            captured_text_newline_separator: Mutex::new(
+                listener
+                    .captured_text_newline_separator
+                    .lock()
+                    .unwrap()
+                    .clone(),
+            ),
             logchan: listener.logchan.clone(),
             update_rx: listener.update_rx.clone(),
             update_tx: listener.update_tx.clone(),

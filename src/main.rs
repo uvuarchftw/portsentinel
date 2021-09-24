@@ -24,17 +24,17 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, Sender, RecvError};
+use crossbeam_channel::{unbounded, Receiver, RecvError, Sender};
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
 use config::*;
+use ipnet::IpNet;
 use settings::load_defaults;
+use std::net::IpAddr;
 use std::sync::mpsc::channel;
 use types::*;
-use ipnet::IpNet;
-use std::net::IpAddr;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const CFG_FILEPATHS: [&str; 4] = [
@@ -152,9 +152,7 @@ fn main() {
                     if settings.teams_logging {
                         let json_msg = Message::new().text(msg);
                         match conn {
-                            LogEntry::LogEntryNFQueue { .. } => {
-
-                            }
+                            LogEntry::LogEntryNFQueue { .. } => {}
                             LogEntry::LogEntryStart { .. } => {
                                 let resp = client
                                     .post(&settings.teams_logging_config.channel_url)
@@ -256,8 +254,7 @@ fn main() {
                             " * Error: {}. Reverting back to last working settings.",
                             refresh_result.unwrap()
                         );
-                    }
-                    else if parse_result.is_some() {
+                    } else if parse_result.is_some() {
                         println!(
                             " * Error: {}. Reverting back to last working settings.",
                             parse_result.unwrap()
@@ -290,18 +287,13 @@ fn main() {
                 for port in old_ports.clone() {
                     // Find port listeners that are no longer in the configuration
                     if !new_ports.contains(&port) {
-                        // TODO Add NFqueue "ports"
-                        println!("RM: {:#?}", port);
-                        // let mut nfqueue = false;
-                        // if port.nfqueue.is_some() {
-                        //     nfqueue = true;
-                        // }
+                        // println!("RM: {:#?}", port);
 
                         // Now find the corresponding port listener and drop the value to stop listening
                         for (index, listener) in listeners.to_vec().iter().enumerate() {
                             if listener.get_port_spec().eq(&port) {
                                 listener.kill_listener();
-                                println!("Killed {:#?}", port);
+                                // println!("Killed {:#?}", port);
                                 listeners.remove(index);
                             }
                         }
@@ -313,7 +305,9 @@ fn main() {
                     let settings = SETTINGS.read().unwrap().settings();
                     listener.update(UpdateType::BlacklistHosts(settings.blacklist_hosts.clone()));
                     listener.update(UpdateType::IOTimeout(settings.io_timeout));
-                    listener.update(UpdateType::NewlineSeparator(settings.captured_text_newline_separator.clone()));
+                    listener.update(UpdateType::NewlineSeparator(
+                        settings.captured_text_newline_separator.clone(),
+                    ));
                 }
 
                 // Find port listeners that need to be added
@@ -353,7 +347,11 @@ fn main() {
     }
 }
 
-pub(crate) fn log_entry_msg(logchan: Sender<LogEntry>, packets: &[u8], con_uuid: uuid::adapter::Hyphenated) {
+pub(crate) fn log_entry_msg(
+    logchan: Sender<LogEntry>,
+    packets: &[u8],
+    con_uuid: uuid::adapter::Hyphenated,
+) {
     let ascii_text: String = parse_ascii(packets);
     let mut hex_text: String = "".to_string();
     let data = hex::encode(packets.clone().to_vec());
@@ -386,7 +384,16 @@ pub(crate) fn log_entry_msg(logchan: Sender<LogEntry>, packets: &[u8], con_uuid:
     }
 }
 
-pub(crate) fn log_nfqueue(logchan: Sender<LogEntry>, mac_addr: String, nfqueue_id: u16, transporttype: TransportType, remoteip: String, remoteport: u16, localip: String, localport: u16) {
+pub(crate) fn log_nfqueue(
+    logchan: Sender<LogEntry>,
+    mac_addr: String,
+    nfqueue_id: u16,
+    transporttype: TransportType,
+    remoteip: String,
+    remoteport: u16,
+    localip: String,
+    localport: u16,
+) {
     if logchan
         .send(LogEntry::LogEntryNFQueue {
             nfqueue_id,
@@ -395,7 +402,7 @@ pub(crate) fn log_nfqueue(logchan: Sender<LogEntry>, mac_addr: String, nfqueue_i
             remoteip,
             remoteport,
             localip,
-            localport
+            localport,
         })
         .is_err()
     {
@@ -404,7 +411,11 @@ pub(crate) fn log_nfqueue(logchan: Sender<LogEntry>, mac_addr: String, nfqueue_i
 }
 
 fn parse_ascii(packets: &[u8]) -> String {
-    let captured_text_newline_seperator = SETTINGS.read().unwrap().settings().captured_text_newline_separator;
+    let captured_text_newline_seperator = SETTINGS
+        .read()
+        .unwrap()
+        .settings()
+        .captured_text_newline_separator;
     let mut printable_text: Vec<u8> = Vec::new();
     for i in 0..packets.len() {
         // ASCII data, only allow newline or carriage return or US keyboard keys
@@ -437,8 +448,18 @@ fn parse_msg(conn: LogEntry) -> String {
             remoteip,
             remoteport,
         } => {
-            format!("[{}]: NFQueue {} {} DEST_IP {}:{} SRC_IP {}:{} MAC_ADDR {}", formatted_time, nfqueue_id, transporttype, localip, localport, remoteip, remoteport, mac_addr)
-        },
+            format!(
+                "[{}]: NFQueue {} {} DEST_IP {}:{} SRC_IP {}:{} MAC_ADDR {}",
+                formatted_time,
+                nfqueue_id,
+                transporttype,
+                localip,
+                localport,
+                remoteip,
+                remoteport,
+                mac_addr
+            )
+        }
         LogEntry::LogEntryStart {
             uuid,
             transporttype,
@@ -482,7 +503,7 @@ fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {
         PortType::IcmpNfqueue {
             port_type,
             nfqueue,
-            bind_ip
+            bind_ip,
         } => PortSpec {
             port_type: port_type.clone(),
             port_range: 0..=0,

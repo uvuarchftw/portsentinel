@@ -8,14 +8,19 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
 
-use std::sync::Arc;
-use crate::types::*;
-use uuid::Uuid;
-use crossbeam_channel::Sender;
-use nfq::{Verdict, Message};
 use crate::log_nfqueue;
+use crate::types::*;
+use crossbeam_channel::Sender;
+use nfq::{Message, Verdict};
+use std::sync::Arc;
+use uuid::Uuid;
 
-fn handle_icmp_packet(logchan: Sender<LogEntry>, msg: &Message, source: IpAddr, destination: IpAddr) {
+fn handle_icmp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
     let icmp = IcmpPacket::new(msg.get_payload());
     match icmp {
         Some(_icmp) => {
@@ -36,7 +41,12 @@ fn handle_icmp_packet(logchan: Sender<LogEntry>, msg: &Message, source: IpAddr, 
     }
 }
 
-fn handle_udp_packet(logchan: Sender<LogEntry>, msg: &Message, source: IpAddr, destination: IpAddr) {
+fn handle_udp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
     let udp = UdpPacket::new(msg.get_payload());
     match udp {
         Some(udp) => {
@@ -57,7 +67,12 @@ fn handle_udp_packet(logchan: Sender<LogEntry>, msg: &Message, source: IpAddr, d
     }
 }
 
-fn handle_tcp_packet(logchan: Sender<LogEntry>, msg: &Message, source: IpAddr, destination: IpAddr) {
+fn handle_tcp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
     let tcp = TcpPacket::new(msg.get_payload());
     match tcp {
         Some(tcp) => {
@@ -87,9 +102,15 @@ pub fn nfq_ipv4_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
             let source = IpAddr::V4(ipv4_header.get_source());
             let dest = IpAddr::V4(ipv4_header.get_destination());
             match ipv4_header.get_next_level_protocol() {
-                IpNextHeaderProtocols::Icmp => handle_icmp_packet(logchan.clone(), &msg, source, dest),
-                IpNextHeaderProtocols::Udp => handle_udp_packet(logchan.clone(), &msg, source, dest),
-                IpNextHeaderProtocols::Tcp => handle_tcp_packet(logchan.clone(), &msg, source, dest),
+                IpNextHeaderProtocols::Icmp => {
+                    handle_icmp_packet(logchan.clone(), &msg, source, dest)
+                }
+                IpNextHeaderProtocols::Udp => {
+                    handle_udp_packet(logchan.clone(), &msg, source, dest)
+                }
+                IpNextHeaderProtocols::Tcp => {
+                    handle_tcp_packet(logchan.clone(), &msg, source, dest)
+                }
                 _ => {
                     unknown = true;
                 }
@@ -112,9 +133,15 @@ pub fn nfq_ipv6_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
             let source = IpAddr::V6(ipv6_header.get_source());
             let dest = IpAddr::V6(ipv6_header.get_destination());
             match ipv6_header.get_next_header() {
-                IpNextHeaderProtocols::Icmp => handle_icmp_packet(logchan.clone(), &msg, source, dest),
-                IpNextHeaderProtocols::Udp => handle_udp_packet(logchan.clone(), &msg, source, dest),
-                IpNextHeaderProtocols::Tcp => handle_tcp_packet(logchan.clone(), &msg, source, dest),
+                IpNextHeaderProtocols::Icmp => {
+                    handle_icmp_packet(logchan.clone(), &msg, source, dest)
+                }
+                IpNextHeaderProtocols::Udp => {
+                    handle_udp_packet(logchan.clone(), &msg, source, dest)
+                }
+                IpNextHeaderProtocols::Tcp => {
+                    handle_tcp_packet(logchan.clone(), &msg, source, dest)
+                }
                 _ => {
                     unknown = true;
                 }
@@ -134,7 +161,10 @@ fn get_mac_str(mac_array: Option<&[u8]>) -> String {
             format!("MAC_GET_ERROR")
         }
         Some(mac_array) => {
-            format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac_array[0], mac_array[1], mac_array[2], mac_array[3], mac_array[4], mac_array[5])
+            format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                mac_array[0], mac_array[1], mac_array[2], mac_array[3], mac_array[4], mac_array[5]
+            )
         }
     };
     return mac_addr;
