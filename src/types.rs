@@ -783,151 +783,120 @@ impl PortListener {
     /// Bind to NFQueue for port traffic
     fn bind_ipv4_nfqueue(&self) {
         let listener_self = self.inner.clone();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         thread::spawn(move || {
-            let (tx, rx) = unbounded();
-            let test = runtime.spawn( PortListener::callback_fn(listener_self, tx));
-            thread::sleep(Duration::from_secs(2));
-            println!("TEST");
-            test.abort();
-            println!("ABORTED {:#?}", "");
-        });
-    }
+            let mut queue = Arc::new(Mutex::new(Queue::open().expect("Unable to open NETLINK queue.")));
+            let nfqueue_num = listener_self.nfqueue.unwrap();
+            queue.lock().unwrap().bind(nfqueue_num).expect(format!("Unable to bind to NFQueue {}", nfqueue_num).as_str());
+            println!("Bound to NFQueue {}", nfqueue_num);
+            queue.lock().unwrap().set_nonblocking(true);
 
-    async fn callback_fn(listener_self: Arc<Listener>, tx: Sender<Message>) {
-        let mut queue = Arc::new(Mutex::new(Queue::open().expect("Unable to open NETLINK queue.")));
-        let nfqueue_num = listener_self.nfqueue.unwrap();
-        queue.lock().unwrap().bind(nfqueue_num).expect(format!("Unable to bind to NFQueue {}", nfqueue_num).as_str());
-        println!("Bound to NFQueue {}", nfqueue_num);
+            loop {
+                match listener_self.update_rx.try_recv() {
+                    Ok(update) => match update {
+                        UpdateType::Die => {
+                            println!("GOT DIE MSG");
+                            break;
+                        }
+                        UpdateType::BlacklistHosts(hosts) => {
+                            *listener_self.blacklist_hosts.lock().unwrap() = hosts;
+                        }
+                        _ => {}
+                    },
+                    Err(_) => {}
+                }
 
-//         loop {
-//             let (tx, mut rx) = oneshot::channel();
-//
-//
-// // Wrap the future with a `Timeout` set to expire in 10 milliseconds.
-//             if let Err(_) = timeout(Duration::from_millis(10), rx).await {
-//                 tx.send(false);
-//                 println!("did not receive value within 10 ms");
-//             } else {
-//                 // println!("did");
-//             }
-//         }
+                let msg_result = queue.lock().unwrap().recv();
 
-        loop {
-            println!("update {}", listener_self.update_rx.len());
-            match listener_self.update_rx.try_recv() {
-                Ok(update) => match update {
-                    UpdateType::Die => {
-                        println!("GOT DIE MSG");
-                        break;
-                    }
-                    UpdateType::BlacklistHosts(hosts) => {
-                        *listener_self.blacklist_hosts.lock().unwrap() = hosts;
-                    }
-                    _ => {}
-                },
-                Err(_) => {}
-            }
+                match msg_result {
+                    Ok(mut msg) => {
+                        let mac_array = msg.get_hw_addr();
+                        let mac_addr = match mac_array {
+                            None => {
+                                format!("MAC_GET_ERROR")
+                            }
+                            Some(mac_array) => {
+                                format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac_array[0], mac_array[1], mac_array[2], mac_array[3], mac_array[4], mac_array[5])
+                            }
+                        };
 
-            let future = async {
-                println!("Waiting for queue");
-                let msg = queue.lock().unwrap().recv().unwrap();
-                println!("Got msg from queue");
-                return msg;
-            };
-
-            if let Ok(mut msg) = tokio::time::timeout(Duration::from_secs(1), future).await {
-                let mac_array = msg.get_hw_addr();
-                let mac_addr = match mac_array {
-                    None => {
-                        format!("MAC_GET_ERROR")
-                    }
-                    Some(mac_array) => {
-                        format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac_array[0], mac_array[1], mac_array[2], mac_array[3], mac_array[4], mac_array[5])
-                    }
-                };
-
-                let mut unknown = false;
-                // assume IPv4
-                let ipv4_header = Ipv4Packet::new(msg.get_payload());
-                match ipv4_header {
-                    Some(ipv4_header) => {
-                        match ipv4_header.get_next_level_protocol() {
-                            IpNextHeaderProtocols::Icmp => {
-                                let icmp_packet = IcmpPacket::new(ipv4_header.payload());
-                                match icmp_packet {
-                                    Some(_icmp) => {
-                                        log_nfqueue(
-                                            listener_self.logchan.clone(),
-                                            mac_addr,
-                                            msg.get_queue_num(),
-                                            TransportType::icmp,
-                                            ipv4_header.get_source().to_string(),
-                                            0,
-                                            ipv4_header.get_destination().to_string(),
-                                            0,
-                                        );
+                        let mut unknown = false;
+                        // assume IPv4
+                        let ipv4_header = Ipv4Packet::new(msg.get_payload());
+                        match ipv4_header {
+                            Some(ipv4_header) => {
+                                match ipv4_header.get_next_level_protocol() {
+                                    IpNextHeaderProtocols::Icmp => {
+                                        let icmp_packet = IcmpPacket::new(ipv4_header.payload());
+                                        match icmp_packet {
+                                            Some(_icmp) => {
+                                                log_nfqueue(
+                                                    listener_self.logchan.clone(),
+                                                    mac_addr,
+                                                    msg.get_queue_num(),
+                                                    TransportType::icmp,
+                                                    ipv4_header.get_source().to_string(),
+                                                    0,
+                                                    ipv4_header.get_destination().to_string(),
+                                                    0,
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    },
+                                    IpNextHeaderProtocols::Udp => {
+                                        let udp_packet = UdpPacket::new(ipv4_header.payload());
+                                        match udp_packet {
+                                            Some(udp) => {
+                                                log_nfqueue(
+                                                    listener_self.logchan.clone(),
+                                                    mac_addr,
+                                                    msg.get_queue_num(),
+                                                    TransportType::udp,
+                                                    ipv4_header.get_source().to_string(),
+                                                    udp.get_source(),
+                                                    ipv4_header.get_destination().to_string(),
+                                                    udp.get_destination(),
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    },
+                                    IpNextHeaderProtocols::Tcp => {
+                                        let tcp_packet = TcpPacket::new(ipv4_header.payload());
+                                        match tcp_packet {
+                                            Some(tcp) => {
+                                                log_nfqueue(
+                                                    listener_self.logchan.clone(),
+                                                    mac_addr,
+                                                    msg.get_queue_num(),
+                                                    TransportType::tcp,
+                                                    ipv4_header.get_source().to_string(),
+                                                    tcp.get_source(),
+                                                    ipv4_header.get_destination().to_string(),
+                                                    tcp.get_destination(),
+                                                );
+                                            }
+                                            None => {}
+                                        }
                                     }
-                                    None => {}
-                                }
-                            },
-                            IpNextHeaderProtocols::Udp => {
-                                let udp_packet = UdpPacket::new(ipv4_header.payload());
-                                match udp_packet {
-                                    Some(udp) => {
-                                        log_nfqueue(
-                                            listener_self.logchan.clone(),
-                                            mac_addr,
-                                            msg.get_queue_num(),
-                                            TransportType::udp,
-                                            ipv4_header.get_source().to_string(),
-                                            udp.get_source(),
-                                            ipv4_header.get_destination().to_string(),
-                                            udp.get_destination(),
-                                        );
+                                    _ => {
+                                        unknown = true;
                                     }
-                                    None => {}
-                                }
-                            },
-                            IpNextHeaderProtocols::Tcp => {
-                                let tcp_packet = TcpPacket::new(ipv4_header.payload());
-                                match tcp_packet {
-                                    Some(tcp) => {
-                                        log_nfqueue(
-                                            listener_self.logchan.clone(),
-                                            mac_addr,
-                                            msg.get_queue_num(),
-                                            TransportType::tcp,
-                                            ipv4_header.get_source().to_string(),
-                                            tcp.get_source(),
-                                            ipv4_header.get_destination().to_string(),
-                                            tcp.get_destination(),
-                                        );
-                                    }
-                                    None => {}
                                 }
                             }
-                            _ => {
+                            None => {
                                 unknown = true;
                             }
                         }
+                        msg.set_verdict(Verdict::Accept);
+                        let _ = queue.lock().unwrap().verdict(msg).unwrap_or(());
                     }
-                    None => {
-                        unknown = true;
+                    Err(_) => {
+                        thread::sleep(Duration::from_millis(50));
                     }
                 }
-
-                msg.set_verdict(Verdict::Accept);
-                let _ = queue.lock().unwrap().verdict(msg).unwrap_or(());
             }
-            else {
-
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
+        });
     }
 
     /// Bind to NFQueue for port traffic
