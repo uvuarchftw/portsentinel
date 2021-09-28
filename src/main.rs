@@ -620,10 +620,10 @@ fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {
         } => PortSpec {
             port_type: port_type.clone(),
             port_range: port_range.clone(),
-            banner: None,
+            banner: Some(banner.clone()),
             bind_ip: bind_ip.clone(),
             nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
+            io_timeout: io_timeout.clone(),
         },
         PortType::MultiPortBanner {
             port_type,
@@ -649,7 +649,7 @@ fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {
             banner: None,
             bind_ip: bind_ip.clone(),
             nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
+            io_timeout: io_timeout.clone(),
         },
         PortType::MultiPort {
             port_type,
