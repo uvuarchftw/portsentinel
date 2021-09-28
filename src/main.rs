@@ -21,10 +21,10 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::sync::RwLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, RecvError, Sender};
+use crossbeam_channel::{unbounded, Receiver, RecvError, Sender, RecvTimeoutError};
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
@@ -99,10 +99,10 @@ fn main() {
 
     // Logging channels
     let (log_tx, log_rx): (Sender<LogEntry>, Receiver<LogEntry>) = unbounded();
+    let (teams_tx, teams_rx): (Sender<(LogEntry, String)>, Receiver<(LogEntry, String)>) = unbounded();
 
-    // Logging thread
+    // Master Logging thread
     thread::spawn(move || {
-        let client = Client::new();
         loop {
             match log_rx.recv() {
                 Ok(conn) => {
@@ -147,52 +147,73 @@ fn main() {
                         }
                     }
 
-                    // TODO Fix Teams logging output
-                    // TODO Add ratelimiting logic (HTTP 429 error)
                     if settings.teams_logging {
-                        let json_msg = Message::new().text(msg);
+                        teams_tx.send((conn, msg));
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    });
+
+    // Teams Logging thread
+    thread::spawn(move || {
+        // Teams limit is 4 POST requests per second
+        let client = Client::new();
+        let duration = Duration::from_millis(500);
+        loop {
+            // Get current global settings
+            let settings = SETTINGS.read().unwrap().settings();
+
+            let mut teams_msg = "".to_string();
+            teams_msg.clear();
+            let deadline = Instant::now() + duration;
+            loop {
+                match teams_rx.recv_deadline(deadline) {
+                    Ok((conn, entry_text)) => {
                         match conn {
-                            LogEntry::LogEntryNFQueue { .. } => {}
+                            LogEntry::LogEntryNFQueue { .. } => {
+                                teams_msg += &entry_text;
+                            }
                             LogEntry::LogEntryStart { .. } => {
-                                let resp = client
-                                    .post(&settings.teams_logging_config.channel_url)
-                                    .json(&json_msg)
-                                    .send()
-                                    .unwrap();
+                                teams_msg += &entry_text;
                             }
                             LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
                                 LogMsgType::Plaintext => {
                                     if settings.teams_logging_config.log_ascii {
-                                        let _resp = client
-                                            .post(&settings.teams_logging_config.channel_url)
-                                            .json(&json_msg)
-                                            .send()
-                                            .unwrap();
+                                        teams_msg += &entry_text;
                                     }
                                 }
                                 LogMsgType::Hex => {
                                     if settings.teams_logging_config.log_hex {
-                                        let _resp = client
-                                            .post(&settings.teams_logging_config.channel_url)
-                                            .json(&json_msg)
-                                            .send()
-                                            .unwrap();
+                                        teams_msg += &entry_text;
                                     }
                                 }
                             },
                             LogEntry::LogEntryFinish { .. } => {
                                 if settings.teams_logging_config.log_disconnect {
-                                    let _resp = client
-                                        .post(&settings.teams_logging_config.channel_url)
-                                        .json(&json_msg)
-                                        .send()
-                                        .unwrap();
+                                    teams_msg += &entry_text;
                                 }
                             }
                         }
+                        teams_msg += &entry_text;
                     }
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(_) => break,
                 }
-                Err(_) => {}
+            }
+
+            if teams_msg.is_empty() {
+                // Nothing to send
+                continue;
+            }
+            else {
+                let json_msg = Message::new().text(teams_msg);
+                let _resp = client
+                    .post(&settings.teams_logging_config.channel_url)
+                    .json(&json_msg)
+                    .send()
+                    .unwrap();
             }
         }
     });
