@@ -1,19 +1,16 @@
 use std::net::IpAddr;
 
-use pnet::packet::icmp::{echo_reply, echo_request, IcmpPacket, IcmpTypes};
-use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+use pnet::packet::icmp::IcmpPacket;
+use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
-use pnet::packet::Packet;
 
 use crate::log_nfqueue;
 use crate::types::*;
 use crossbeam_channel::Sender;
 use nfq::{Message, Verdict};
-use std::sync::Arc;
-use uuid::Uuid;
 
 fn handle_icmp_packet(
     logchan: Sender<LogEntry>,

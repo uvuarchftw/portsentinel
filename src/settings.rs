@@ -1,5 +1,4 @@
-use crate::CFG_FILEPATHS;
-use config::{Config, File};
+use config::Config;
 
 pub(crate) fn load_defaults() -> Config {
     let mut settings = config::Config::new();

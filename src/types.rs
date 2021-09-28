@@ -1,30 +1,18 @@
 use crate::listeners::{nfq_ipv4_callback, nfq_ipv6_callback};
-use crate::{log_entry_msg, log_nfqueue};
+use crate::log_entry_msg;
 use config::{Config, ConfigError, File, Value};
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use futures_util::future::FutureExt;
-use futures_util::Future;
+use crossbeam_channel::{Receiver, Sender};
 use ipnet::IpNet;
-use nfq::{Message, Queue, Verdict};
-use pnet::packet::icmp::IcmpPacket;
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::ipv6::Ipv6Packet;
-use pnet::packet::tcp::TcpPacket;
-use pnet::packet::udp::UdpPacket;
-use pnet::packet::Packet;
+use nfq::Queue;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
-use std::error::Error as std_err;
 use std::io::{Read, Write};
 use std::net::{TcpListener, UdpSocket};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{fmt, io, thread};
-use tokio::sync::oneshot;
-use tokio::time::timeout;
+use std::{fmt, thread};
 use uuid::Uuid;
 
 pub(crate) trait AppSettings {
@@ -55,7 +43,7 @@ impl AppSettings for Config {
 
     fn check_source<'e>(&self, new_source: String) -> Option<ConfigError> {
         let config = match self.clone().merge(File::with_name(&new_source)) {
-            Ok(test) => {
+            Ok(_test) => {
                 // println!("{:#?}", test);
                 // Also check if parsing the configuration into AppSettings type will work too
 
@@ -791,7 +779,7 @@ impl PortListener {
     fn bind_nfqueue(&self, ipv4: bool) {
         let listener_self = self.inner.clone();
         thread::spawn(move || {
-            let mut queue = Arc::new(Mutex::new(
+            let queue = Arc::new(Mutex::new(
                 Queue::open().expect("Unable to open NETLINK queue."),
             ));
             let nfqueue_num = listener_self.nfqueue.unwrap();

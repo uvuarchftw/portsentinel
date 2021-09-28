@@ -24,15 +24,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, RecvError, Sender, RecvTimeoutError};
+use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
 use config::*;
-use ipnet::IpNet;
 use settings::load_defaults;
-use std::net::IpAddr;
 use std::sync::mpsc::channel;
 use types::*;
 
@@ -99,7 +97,8 @@ fn main() {
 
     // Logging channels
     let (log_tx, log_rx): (Sender<LogEntry>, Receiver<LogEntry>) = unbounded();
-    let (teams_tx, teams_rx): (Sender<(LogEntry, String)>, Receiver<(LogEntry, String)>) = unbounded();
+    let (teams_tx, teams_rx): (Sender<(LogEntry, String)>, Receiver<(LogEntry, String)>) =
+        unbounded();
 
     // Master Logging thread
     thread::spawn(move || {
@@ -148,7 +147,7 @@ fn main() {
                     }
 
                     if settings.teams_logging {
-                        teams_tx.send((conn, msg));
+                        let _ = teams_tx.send((conn, msg));
                     }
                 }
                 Err(_) => {}
@@ -206,8 +205,7 @@ fn main() {
             if teams_msg.is_empty() {
                 // Nothing to send
                 continue;
-            }
-            else {
+            } else {
                 let json_msg = Message::new().text(teams_msg);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
