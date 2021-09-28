@@ -3,9 +3,6 @@ use config::Config;
 pub(crate) fn load_defaults() -> Config {
     let mut settings = config::Config::new();
     settings
-        .set_default("exit_on_error", false)
-        .expect("Cannot set default value for exit_on_error setting");
-    settings
         .set_default("print_config", true)
         .expect("Cannot set default value for print_config setting");
     settings
