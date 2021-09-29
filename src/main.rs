@@ -29,10 +29,10 @@ use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
+use crate::settings::{load_defaults, show};
+use crate::types::*;
 use config::*;
-use settings::load_defaults;
 use std::sync::mpsc::channel;
-use types::*;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const CFG_FILEPATHS: [&str; 4] = [
@@ -55,7 +55,7 @@ fn main() {
     println!("PortSentinel v{}", VERSION);
     println!("{}", str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n"));
 
-    //// Gather setting files
+    //// Gather settings files
     // Create a channel to receive the write events to any configuration files
     let (watcher_tx, watcher_rx) = channel();
     // Automatically select the best implementation for the platform.
@@ -239,6 +239,7 @@ fn main() {
     }
 
     loop {
+        // Wait for a change in the files
         match watcher_rx.try_recv() {
             Ok(DebouncedEvent::Write(path)) => {
                 println!(
@@ -510,11 +511,6 @@ fn parse_msg(conn: LogEntry) -> String {
             )
         }
     };
-}
-
-fn show() {
-    let settings = SETTINGS.read().unwrap().settings();
-    println!(" * Settings :: \n\x1b[31m{:#?}\x1b[0m", settings);
 }
 
 fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {

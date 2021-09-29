@@ -1,5 +1,8 @@
 use config::Config;
+use crate::SETTINGS;
+use crate::types::AppSettings;
 
+/// Set default values for some settings
 pub(crate) fn load_defaults() -> Config {
     let mut settings = config::Config::new();
     settings
@@ -18,4 +21,9 @@ pub(crate) fn load_defaults() -> Config {
         .set_default("io_timeout_seconds", 300)
         .expect("Cannot set default value for io_timeout setting");
     return settings;
+}
+
+pub(crate) fn show() {
+    let settings = SETTINGS.read().unwrap().settings();
+    println!(" * Settings :: \n\x1b[31m{:#?}\x1b[0m", settings);
 }
