@@ -30,7 +30,7 @@ use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
 use crate::listeners::PortListener;
-use crate::settings::{load_defaults, show};
+use crate::settings::{load_defaults, show, AppSettings};
 use crate::types::*;
 use config::*;
 use std::sync::mpsc::channel;

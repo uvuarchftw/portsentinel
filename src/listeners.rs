@@ -93,6 +93,7 @@ impl Listener {
         }
     }
 
+    /// Return port specification
     fn get_port_spec(&self) -> PortSpec {
         return self.port_spec.clone();
     }
@@ -132,10 +133,10 @@ impl PortListener {
                 // This port listener will not have a socket set
                 match port_spec.bind_ip {
                     IpNet::V4(_addr) => {
-                        pl.bind_nfqueue(true);
+                        pl.nfqueue_listener(true);
                     }
                     IpNet::V6(_addr) => {
-                        pl.bind_nfqueue(false);
+                        pl.nfqueue_listener(false);
                     }
                 }
                 match port_spec.port_type {
@@ -162,18 +163,22 @@ impl PortListener {
         return pl;
     }
 
+    /// Get the port specification for a listener
     pub(crate) fn get_port_spec(&self) -> PortSpec {
         return self.inner.get_port_spec();
     }
 
+    /// Kill a listener
     pub(crate) fn kill_listener(&self) {
         let _ = self.inner.update_tx.send(UpdateType::Die);
     }
 
+    /// Update a listener for current settings
     pub(crate) fn update(&self, update: UpdateType) {
         let _ = self.inner.update_tx.send(update);
     }
 
+    /// Create a TCP listener
     fn tcp_listener(&self) {
         let listener_self = self.inner.clone();
         thread::spawn(move || {
@@ -373,6 +378,7 @@ impl PortListener {
         });
     }
 
+    /// Create a UDP listener
     fn udp_listener(&self) {
         let listener_self = self.inner.clone();
         thread::spawn(move || {
@@ -451,8 +457,8 @@ impl PortListener {
         });
     }
 
-    /// Bind to NFQueue for port traffic
-    fn bind_nfqueue(&self, ipv4: bool) {
+    /// Create a NFQueue listener
+    fn nfqueue_listener(&self, ipv4: bool) {
         let listener_self = self.inner.clone();
         thread::spawn(move || {
             let queue = Arc::new(Mutex::new(
@@ -489,84 +495,7 @@ impl PortListener {
     }
 }
 
-fn handle_icmp_packet(
-    logchan: Sender<LogEntry>,
-    msg: &Message,
-    source: IpAddr,
-    destination: IpAddr,
-) {
-    let icmp = IcmpPacket::new(msg.get_payload());
-    match icmp {
-        Some(_icmp) => {
-            let mac_addr = get_mac_str(msg.get_hw_addr());
-
-            log_nfqueue(
-                logchan,
-                mac_addr,
-                msg.get_queue_num(),
-                TransportType::icmp,
-                source.to_string(),
-                0,
-                destination.to_string(),
-                0,
-            );
-        }
-        None => {}
-    }
-}
-
-fn handle_udp_packet(
-    logchan: Sender<LogEntry>,
-    msg: &Message,
-    source: IpAddr,
-    destination: IpAddr,
-) {
-    let udp = UdpPacket::new(msg.get_payload());
-    match udp {
-        Some(udp) => {
-            let mac_addr = get_mac_str(msg.get_hw_addr());
-
-            log_nfqueue(
-                logchan,
-                mac_addr,
-                msg.get_queue_num(),
-                TransportType::udp,
-                source.to_string(),
-                udp.get_source(),
-                destination.to_string(),
-                udp.get_destination(),
-            );
-        }
-        None => {}
-    }
-}
-
-fn handle_tcp_packet(
-    logchan: Sender<LogEntry>,
-    msg: &Message,
-    source: IpAddr,
-    destination: IpAddr,
-) {
-    let tcp = TcpPacket::new(msg.get_payload());
-    match tcp {
-        Some(tcp) => {
-            let mac_addr = get_mac_str(msg.get_hw_addr());
-
-            log_nfqueue(
-                logchan,
-                mac_addr,
-                msg.get_queue_num(),
-                TransportType::tcp,
-                source.to_string(),
-                tcp.get_source(),
-                destination.to_string(),
-                tcp.get_destination(),
-            );
-        }
-        None => {}
-    }
-}
-
+/// Main IPv4 NFQueue callback function
 pub fn nfq_ipv4_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
     let mut unknown = false;
     // assume IPv4
@@ -601,6 +530,7 @@ pub fn nfq_ipv4_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
     msg.set_verdict(Verdict::Drop);
 }
 
+/// Main IPv6 NFQueue callback function
 pub fn nfq_ipv6_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
     let mut unknown = false;
     // assume IPv4
@@ -635,6 +565,88 @@ pub fn nfq_ipv6_callback(mut msg: nfq::Message, logchan: Sender<LogEntry>) {
     msg.set_verdict(Verdict::Drop);
 }
 
+/// Handle ICMP packets from NFQueues
+fn handle_icmp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
+    let icmp = IcmpPacket::new(msg.get_payload());
+    match icmp {
+        Some(_icmp) => {
+            let mac_addr = get_mac_str(msg.get_hw_addr());
+
+            log_nfqueue(
+                logchan,
+                mac_addr,
+                msg.get_queue_num(),
+                TransportType::icmp,
+                source.to_string(),
+                0,
+                destination.to_string(),
+                0,
+            );
+        }
+        None => {}
+    }
+}
+
+/// Handle UDP packets from NFQueues
+fn handle_udp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
+    let udp = UdpPacket::new(msg.get_payload());
+    match udp {
+        Some(udp) => {
+            let mac_addr = get_mac_str(msg.get_hw_addr());
+
+            log_nfqueue(
+                logchan,
+                mac_addr,
+                msg.get_queue_num(),
+                TransportType::udp,
+                source.to_string(),
+                udp.get_source(),
+                destination.to_string(),
+                udp.get_destination(),
+            );
+        }
+        None => {}
+    }
+}
+
+/// Handle TCP packets from NFQueues
+fn handle_tcp_packet(
+    logchan: Sender<LogEntry>,
+    msg: &Message,
+    source: IpAddr,
+    destination: IpAddr,
+) {
+    let tcp = TcpPacket::new(msg.get_payload());
+    match tcp {
+        Some(tcp) => {
+            let mac_addr = get_mac_str(msg.get_hw_addr());
+
+            log_nfqueue(
+                logchan,
+                mac_addr,
+                msg.get_queue_num(),
+                TransportType::tcp,
+                source.to_string(),
+                tcp.get_source(),
+                destination.to_string(),
+                tcp.get_destination(),
+            );
+        }
+        None => {}
+    }
+}
+
+/// Format the MAC address from u8 to String
 fn get_mac_str(mac_array: Option<&[u8]>) -> String {
     let mac_addr = match mac_array {
         None => {
