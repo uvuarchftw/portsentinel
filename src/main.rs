@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use mhteams::Message;
+use mhteams::{Message, Section};
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
@@ -161,58 +161,52 @@ fn main() {
         // Teams limit is 4 POST requests per second
         let client = Client::new();
         let duration = Duration::from_millis(500);
-        let newline = "\n";
         loop {
             // Get current global settings
             let settings = SETTINGS.read().unwrap().settings();
-
-            let mut teams_msg = "".to_string();
-            teams_msg.clear();
             let deadline = Instant::now() + duration;
+            let json_msg = Message::new();
+            let mut msgs = vec![];
             loop {
                 match teams_rx.recv_deadline(deadline) {
-                    Ok((conn, entry_text)) => {
-                        let entry_text = newline.to_owned() + &entry_text;
-                        match conn {
-                            LogEntry::LogEntryNFQueue { .. } => {
-                                teams_msg += &entry_text;
+                    Ok((conn, entry_text)) => match conn {
+                        LogEntry::LogEntryNFQueue { .. } => {
+                            msgs.push(Section::new().title(entry_text));
+                        }
+                        LogEntry::LogEntryStart { .. } => {
+                            msgs.push(Section::new().title(entry_text));
+                        }
+                        LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                            LogMsgType::Plaintext => {
+                                if settings.teams_logging_config.log_ascii {
+                                    msgs.push(Section::new().title(entry_text));
+                                }
                             }
-                            LogEntry::LogEntryStart { .. } => {
-                                teams_msg += &entry_text;
+                            LogMsgType::Hex => {
+                                if settings.teams_logging_config.log_hex {
+                                    msgs.push(Section::new().title(entry_text));
+                                }
                             }
-                            LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
-                                LogMsgType::Plaintext => {
-                                    if settings.teams_logging_config.log_ascii {
-                                        teams_msg += &entry_text;
-                                    }
-                                }
-                                LogMsgType::Hex => {
-                                    if settings.teams_logging_config.log_hex {
-                                        teams_msg += &entry_text;
-                                    }
-                                }
-                            },
-                            LogEntry::LogEntryFinish { .. } => {
-                                if settings.teams_logging_config.log_disconnect {
-                                    teams_msg += &entry_text;
-                                }
+                        },
+                        LogEntry::LogEntryFinish { .. } => {
+                            if settings.teams_logging_config.log_disconnect {
+                                msgs.push(Section::new().title(entry_text));
                             }
                         }
-                        teams_msg += &entry_text;
-                    }
+                    },
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(_) => break,
                 }
             }
 
-            if teams_msg.is_empty() {
+            if msgs.is_empty() {
                 // Nothing to send
                 continue;
             } else {
-                let json_msg = Message::new().text(teams_msg);
+                let complete_message = json_msg.sections(msgs);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
-                    .json(&json_msg)
+                    .json(&complete_message)
                     .send()
                     .unwrap();
             }
