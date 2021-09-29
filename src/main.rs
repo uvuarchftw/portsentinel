@@ -161,6 +161,7 @@ fn main() {
         // Teams limit is 4 POST requests per second
         let client = Client::new();
         let duration = Duration::from_millis(500);
+        let newline = "\n";
         loop {
             // Get current global settings
             let settings = SETTINGS.read().unwrap().settings();
@@ -171,6 +172,7 @@ fn main() {
             loop {
                 match teams_rx.recv_deadline(deadline) {
                     Ok((conn, entry_text)) => {
+                        let entry_text = newline + entry_text;
                         match conn {
                             LogEntry::LogEntryNFQueue { .. } => {
                                 teams_msg += &entry_text;
