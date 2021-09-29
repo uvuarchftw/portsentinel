@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use mhteams::{Message, Section, Fact};
+use mhteams::{Message, Section};
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
@@ -205,7 +205,7 @@ fn main() {
                 // Nothing to send
                 continue;
             } else {
-                let complete_message= Message::new().title("Portsentinel").text("text test");
+                let complete_message= Message::new().title("PortSentinel").text("Connection Alert").sections(msgs);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
                     .json(&complete_message)
