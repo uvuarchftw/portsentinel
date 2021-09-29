@@ -172,7 +172,7 @@ fn main() {
             loop {
                 match teams_rx.recv_deadline(deadline) {
                     Ok((conn, entry_text)) => {
-                        let entry_text = newline + entry_text;
+                        let entry_text = newline.to_owned() + &entry_text;
                         match conn {
                             LogEntry::LogEntryNFQueue { .. } => {
                                 teams_msg += &entry_text;
