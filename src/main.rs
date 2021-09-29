@@ -207,23 +207,6 @@ fn main() {
                 continue;
             } else {
                 let complete_message = json_msg.sections(msgs);
-                let complete_message = Message::new()
-                    .title("My title 😉")
-                    .text("TL;DR: it's awesome 👍")
-                    .sections(vec![
-                        Section::new()
-                            .title("The **Section**")
-                            .activity_title("_Check this out_")
-                            .activity_subtitle("It's awesome")
-                            .activity_image("https://sweet.image/cute.png")
-                            .activity_text("Lorum ipsum!"),
-                        Section::new()
-                            .title("Layin down some facts ✅")
-                            .facts(vec![
-                                Fact::new("Name", "John Smith"),
-                                Fact::new("Language", "Rust. What else?"),
-                            ]),
-                    ]);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
                     .json(&complete_message)
