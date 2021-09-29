@@ -1,6 +1,6 @@
-use config::Config;
-use crate::SETTINGS;
 use crate::types::AppSettings;
+use crate::SETTINGS;
+use config::Config;
 
 /// Set default values for some settings
 pub(crate) fn load_defaults() -> Config {

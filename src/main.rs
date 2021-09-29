@@ -29,6 +29,7 @@ use mhteams::Message;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::blocking::Client;
 
+use crate::listeners::PortListener;
 use crate::settings::{load_defaults, show};
 use crate::types::*;
 use config::*;
@@ -344,6 +345,7 @@ fn main() {
             }
 
             Err(_err) => {
+                // Test to see if alternative configuration file paths are now available
                 let mut index = 0;
                 for path in failed_paths.clone().iter() {
                     let res = watcher.watch(path, RecursiveMode::NonRecursive);
@@ -367,6 +369,7 @@ fn main() {
     }
 }
 
+/// Send message at the start of a connection (not nfqueue) to be logged
 pub(crate) fn log_entry_msg(
     logchan: Sender<LogEntry>,
     packets: &[u8],
@@ -404,6 +407,7 @@ pub(crate) fn log_entry_msg(
     }
 }
 
+/// Send nfqueue message to be logged
 pub(crate) fn log_nfqueue(
     logchan: Sender<LogEntry>,
     mac_addr: String,
@@ -430,6 +434,7 @@ pub(crate) fn log_nfqueue(
     }
 }
 
+/// Parse any ascii text from packet data
 fn parse_ascii(packets: &[u8]) -> String {
     let captured_text_newline_seperator = SETTINGS
         .read()
@@ -455,6 +460,7 @@ fn parse_ascii(packets: &[u8]) -> String {
     return ascii_text;
 }
 
+/// Parse LogEntry and format it into a text message to be sent to the different logging parts
 fn parse_msg(conn: LogEntry) -> String {
     let current_time = Local::now();
     let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
@@ -511,152 +517,4 @@ fn parse_msg(conn: LogEntry) -> String {
             )
         }
     };
-}
-
-fn get_port_spec(port: &PortType, settings: &AppConfig) -> PortSpec {
-    let port_spec: PortSpec = match port {
-        PortType::IcmpNfqueue {
-            port_type,
-            nfqueue,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: 0..=0,
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: Some(*nfqueue),
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::SinglePortNfqueue {
-            port_type,
-            port_num,
-            nfqueue,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_num.clone()..=port_num.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: Some(nfqueue.clone()),
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::SinglePortBannerIoTimeout {
-            port_type,
-            port_num,
-            banner,
-            bind_ip,
-            io_timeout,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_num.clone()..=port_num.clone(),
-            banner: Some(banner.clone()),
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: io_timeout.clone(),
-        },
-        PortType::SinglePortBanner {
-            port_type,
-            port_num,
-            banner,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_num.clone()..=port_num.clone(),
-            banner: Some(banner.clone()),
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::SinglePortIoTimeout {
-            port_type,
-            port_num,
-            bind_ip,
-            io_timeout,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_num.clone()..=port_num.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: io_timeout.clone(),
-        },
-        PortType::SinglePort {
-            port_type,
-            port_num,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_num.clone()..=port_num.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::MultiPortNfqueue {
-            port_type,
-            port_range,
-            bind_ip,
-            nfqueue,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_range.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: Some(nfqueue.clone()),
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::MultiPortBannerIoTimeout {
-            port_type,
-            port_range,
-            banner,
-            bind_ip,
-            io_timeout,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_range.clone(),
-            banner: Some(banner.clone()),
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: io_timeout.clone(),
-        },
-        PortType::MultiPortBanner {
-            port_type,
-            port_range,
-            banner,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_range.clone(),
-            banner: Some(banner.clone()),
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
-        },
-        PortType::MultiPortIoTimeout {
-            port_type,
-            port_range,
-            bind_ip,
-            io_timeout,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_range.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: io_timeout.clone(),
-        },
-        PortType::MultiPort {
-            port_type,
-            port_range,
-            bind_ip,
-        } => PortSpec {
-            port_type: port_type.clone(),
-            port_range: port_range.clone(),
-            banner: None,
-            bind_ip: bind_ip.clone(),
-            nfqueue: None,
-            io_timeout: settings.clone().io_timeout,
-        },
-    };
-    return port_spec;
 }
