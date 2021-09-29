@@ -119,7 +119,6 @@ pub struct TeamsLoggingConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
     pub(crate) blacklist_hosts: Vec<IpNet>,
-    pub(crate) exit_on_error: bool,
     pub(crate) print_config: bool,
     pub(crate) captured_text_newline_separator: String,
     #[serde(rename = "io_timeout_seconds")]
