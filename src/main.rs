@@ -170,7 +170,7 @@ fn main() {
             loop {
                 match teams_rx.recv_deadline(deadline) {
                     Ok((conn, entry_text)) => {
-                        let section = Section::new().title(entry_text).text("test1").activity_text("test3").activity_title("test2");
+                        let section = Section::new().title(entry_text);
                         match conn {
                             LogEntry::LogEntryNFQueue { .. } => {
                                 msgs.push(section);
