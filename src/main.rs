@@ -205,7 +205,7 @@ fn main() {
                 // Nothing to send
                 continue;
             } else {
-                let complete_message= Message::new().title("Portsentinel").sections(msgs);
+                let complete_message= Message::new().title("Portsentinel").text("text test");
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
                     .json(&complete_message)
