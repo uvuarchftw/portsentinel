@@ -165,7 +165,6 @@ fn main() {
             // Get current global settings
             let settings = SETTINGS.read().unwrap().settings();
             let deadline = Instant::now() + duration;
-            let json_msg = Message::new();
             let mut msgs = vec![];
             loop {
                 match teams_rx.recv_deadline(deadline) {
@@ -206,7 +205,7 @@ fn main() {
                 // Nothing to send
                 continue;
             } else {
-                let complete_message = json_msg.sections(msgs);
+                let complete_message= Message::new().title("Portsentinel").sections(msgs);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
                     .json(&complete_message)
