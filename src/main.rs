@@ -169,28 +169,31 @@ fn main() {
             let mut msgs = vec![];
             loop {
                 match teams_rx.recv_deadline(deadline) {
-                    Ok((conn, entry_text)) => match conn {
-                        LogEntry::LogEntryNFQueue { .. } => {
-                            msgs.push(Section::new().title(entry_text));
-                        }
-                        LogEntry::LogEntryStart { .. } => {
-                            msgs.push(Section::new().title(entry_text));
-                        }
-                        LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
-                            LogMsgType::Plaintext => {
-                                if settings.teams_logging_config.log_ascii {
-                                    msgs.push(Section::new().title(entry_text));
-                                }
+                    Ok((conn, entry_text)) => {
+                        let section = Section::new().title(entry_text);
+                        match conn {
+                            LogEntry::LogEntryNFQueue { .. } => {
+                                msgs.push(section);
                             }
-                            LogMsgType::Hex => {
-                                if settings.teams_logging_config.log_hex {
-                                    msgs.push(Section::new().title(entry_text));
-                                }
+                            LogEntry::LogEntryStart { .. } => {
+                                msgs.push(section);
                             }
-                        },
-                        LogEntry::LogEntryFinish { .. } => {
-                            if settings.teams_logging_config.log_disconnect {
-                                msgs.push(Section::new().title(entry_text));
+                            LogEntry::LogEntryMsg { msgtype, .. } => match msgtype {
+                                LogMsgType::Plaintext => {
+                                    if settings.teams_logging_config.log_ascii {
+                                        msgs.push(section);
+                                    }
+                                }
+                                LogMsgType::Hex => {
+                                    if settings.teams_logging_config.log_hex {
+                                        msgs.push(section);
+                                    }
+                                }
+                            },
+                            LogEntry::LogEntryFinish { .. } => {
+                                if settings.teams_logging_config.log_disconnect {
+                                    msgs.push(section);
+                                }
                             }
                         }
                     },
