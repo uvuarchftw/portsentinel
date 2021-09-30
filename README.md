@@ -59,4 +59,4 @@ The configuration file can currently live in only 4 locations:
 | `ports.*.banner` | The banner to send to a client. Note: This cannot be specified when also using a NFQueue for a port specification |  |
 | `ports.*.bind_ip` | The IP address to listen on |  |
 | `ports.*.io_timeout` | Number of seconds to wait before connection times out. Overrides global `io_timeout_seconds` |  |
-| `ports.*.nfqueue` | Set port listener to bind to NFQueue |  |
+| `ports.*.nfqueue` | Set port listener to bind to NFQueue. Note: Using this requires the program to be run as root to successfully bind to NFQueues |  |
