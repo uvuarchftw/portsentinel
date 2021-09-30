@@ -121,6 +121,27 @@ pub enum LogEntry {
     },
 }
 
+impl LogEntry {
+    pub(crate) fn get_remote_ip(&self) -> &str {
+        return match self {
+            LogEntry::LogEntryNFQueue { remoteip, .. } => remoteip,
+            LogEntry::LogEntryStart { remoteip, .. } => remoteip,
+            LogEntry::LogEntryMsg { .. } => "",
+            LogEntry::LogEntryFinish { .. } => "",
+        };
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_local_ip(&self) -> &str {
+        return match self {
+            LogEntry::LogEntryNFQueue { localip, .. } => localip,
+            LogEntry::LogEntryStart { localip, .. } => localip,
+            LogEntry::LogEntryMsg { .. } => "",
+            LogEntry::LogEntryFinish { .. } => "",
+        };
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum PortType {

@@ -109,8 +109,15 @@ fn main() {
                     // Get current global settings
                     let settings = SETTINGS.read().unwrap().settings();
 
-                    let msg = parse_msg(conn.clone());
+                    // Check if connection is part of the blacklists hosts
+                    for host in settings.blacklist_hosts {
+                        if host.to_string().eq_ignore_ascii_case(conn.get_remote_ip()) {
+                            // Match to one of the blacklists hosts, discard log entry
+                            continue;
+                        }
+                    }
 
+                    let msg = parse_msg(conn.clone());
                     if settings.screen_logging {
                         println!("{}", msg);
                     }
@@ -195,7 +202,7 @@ fn main() {
                                 }
                             }
                         }
-                    },
+                    }
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(_) => break,
                 }
@@ -205,7 +212,10 @@ fn main() {
                 // Nothing to send
                 continue;
             } else {
-                let complete_message= Message::new().title("PortSentinel").text("Connection Alert").sections(msgs);
+                let complete_message = Message::new()
+                    .title("PortSentinel")
+                    .text("Connection Alert")
+                    .sections(msgs);
                 let _resp = client
                     .post(&settings.teams_logging_config.channel_url)
                     .json(&complete_message)
